@@ -1,0 +1,185 @@
+name: keira
+company: Keira Capital Partners Inc.
+product: M&A advisory — connecting business owners with buyers
+website: null
+tagline: Helping Ottawa/Eastern Ontario business owners exit ($10–100M)
+
+icp:
+  industries: all
+  titles:
+    - Owner
+    - Founder
+    - CEO
+    - President
+  company_size:
+    valuation_min_m: 10
+    valuation_max_m: 100
+  geography:
+    - Ottawa
+    - Eastern Ontario
+    - Kingston
+    - Cornwall
+
+value_props:
+  - Confidential outreach to owners considering a sale
+  - Focus on businesses valued $10–100M
+  - Local Ottawa/Eastern Ontario market expertise
+
+disqualifiers:
+  - Businesses under $10M valuation
+  - Businesses over $100M (different deal structure)
+  - Outside Ottawa/Eastern Ontario region
+  - M&A brokers, business-for-sale marketplaces, advisory/accounting firms (competitors, not sellers)
+  - Corporate executives at large national brands without owner/succession signals
+
+blocklist:
+  - dealstream
+  - sunbelt
+  - bizbuysell
+  - businessesforsale
+  - axial
+  - mnp
+  - bdc
+  - kpmg
+  - deloitte
+  - pwc
+  - ey
+  - broker
+  - advisory
+  - accounting
+  - law firm
+  - investment bank
+  - private equity
+  - search fund
+  - holding company
+  - chamber of commerce
+  - university
+  - nonprofit
+  - franchisor
+
+outreach_tone: discreet, respectful, owner-to-advisor
+
+prompts:
+  qualify_system: "You qualify M&A advisory leads for Keira Capital Partners. Output strict JSON only."
+  qualify_extra: |
+    Jay prospects business OWNERS in Ottawa and Eastern Ontario (including Kingston, Cornwall)
+    who may want to SELL their business. Ideal deal size is $10–100M valuation. Sector-agnostic.
+
+    Score using these weights:
+    - Geography (Ottawa/Eastern Ontario): 20%
+    - Owner decision-maker (Owner/Founder/President of private company): 20%
+    - Estimated company size/valuation ($10–100M): 30%
+    - Succession/exit signals: 15%
+    - Business quality (25+ years, multi-location, stable B2B): 10%
+    - Research confidence: 5%
+
+    Succession signals (add 10–20 points when present): founder since 1980s–2000s, family-owned,
+    owner age 55+, no obvious successor, long tenure, "next chapter" language, President=Founder.
+
+    Hard-skip: M&A brokers, marketplaces, accounting/law/investment banking firms, PE, search funds,
+    government, nonprofits, franchisors. Score corporate VPs at national brands below 30.
+
+    Employee proxy: 20–500 employees = sweet spot; under 15 likely too small; 5,000+ too large.
+
+    In JSON also include when inferable: confidence (0-100), estimated_company_size (e.g. "$15M-$30M"),
+    ownership_confidence (high/medium/low), succession_signals (array).
+  outreach_system: "You write discreet, respectful owner-to-advisor emails for Keira Capital. Output the complete email only."
+  outreach_extra: |
+    Keep it confidential and low-pressure. Never mention that you found them on a listing site.
+    Frame as a discreet conversation about strategic options or succession — not a hard sell.
+
+research_keywords: 'owner OR founder OR "family business" OR succession OR "looking to sell" OR retirement'
+
+discover:
+  max_queries: 10
+  results_per_query: 5
+  default_limit: 5
+  queries:
+    - '"business for sale" Ottawa manufacturer OR distributor OR services'
+    - 'Ottawa "family business" succession OR retirement owner'
+    - '"Eastern Ontario" company acquisition OR "looking to sell"'
+    - 'Ottawa business owner retiring "no successor"'
+    - '"Ottawa Business Journal" fastest growing companies owner'
+    - 'Eastern Ontario manufacturer "second generation" owner'
+    - 'Ottawa company "founded in 19" owner founder manufacturer'
+    - '"Kingston" OR "Cornwall" Ontario manufacturer owner retiring sale'
+    - 'Ottawa "founder" OR "owner-operated" services company Eastern Ontario'
+
+apollo:
+  person_titles:
+    - Owner
+    - Founder
+    - President
+    - CEO
+  person_seniorities:
+    - owner
+    - founder
+    - c_suite
+  person_locations:
+    - Ottawa, Canada
+  organization_locations:
+    - Ontario, Canada
+  employee_ranges:
+    - "11,50"
+    - "51,200"
+    - "201,500"
+
+actava:
+  max_queries: 8
+  results_per_query: 5
+  # Optional override for external agent runs (see actava_agent.yaml for full blueprint)
+  # prospect_prompt: |
+  #   Find {limit} owner-operated businesses in Ottawa/Eastern Ontario...
+
+seamless:
+  contact_country:
+    - Canada
+  contact_state:
+    - Ontario
+  location_type: company
+  job_title:
+    - Owner
+    - Founder
+    - President
+    - CEO
+  seniority:
+    - C-Level
+    - VP
+    - Director
+  company_size:
+    - 11 - 50
+    - 51 - 200
+    - 201 - 500
+  company_revenue:
+    - $5M - $20M
+    - $20M - $50M
+    - $50M - $100M
+  company_founded_on:
+    - 10+ Years
+  industry:
+    - Manufacturing
+    - Construction
+    - Logistics & Supply Chain
+    - Wholesale & Distribution
+    - Facilities Services
+    - IT Services
+  contact_keyword:
+    - family business
+    - succession
+
+pdl:
+  job_title_keywords:
+    - owner
+    - founder
+    - chief executive
+  job_company_sizes:
+    - "11-50"
+    - "51-200"
+    - "201-500"
+  job_title_levels:
+    - owner
+    - cxo
+  require_work_email: false
+  filter_industries: false
+  per_page: 25
+  location_region: "ontario"

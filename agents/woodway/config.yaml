@@ -1,0 +1,104 @@
+name: woodway
+company: Woodway Assurance
+product: EviData
+website: https://www.woodwayassurance.com
+tagline: Validates the risk of re-identification for anonymized data
+
+icp:
+  industries:
+    - pharma
+    - banking
+    - financial services
+    - insurance
+    - healthcare
+    - data aggregators
+    - technology
+  titles:
+    - VP Data Governance
+    - VP AI Governance
+    - Director of Privacy
+    - Director of Data Sharing
+    - Chief Privacy Officer
+    - Head of Data Governance
+    - Director of Data Protection
+    - Head of Information Governance
+  company_size: large
+  geography: global
+
+value_props:
+  - Quantifies re-identification risk in anonymized datasets
+  - Supports regulatory compliance (privacy, data sharing)
+  - Gives Data/AI Governance teams defensible metrics for leadership
+
+disqualifiers:
+  - Companies with no anonymized or shared data
+  - Startups under 50 employees with minimal data assets
+  - Roles outside privacy, governance, or data sharing
+
+blocklist: []
+
+outreach_tone: professional, consultative, privacy-focused
+
+prompts:
+  qualify_system: "You qualify B2B sales leads for Woodway Assurance (EviData). Output strict JSON only."
+  qualify_extra: |
+    Jay sells EviData to large companies in pharma, banking, financial services, insurance,
+    healthcare, data aggregators, and technology. Target VP/Director roles in Data Governance,
+    AI Governance, Privacy, or Data Sharing. Larger companies score higher — a 5,000-person
+    bank is a stronger fit than a 200-person startup. OK to sway slightly for strong governance
+    or privacy signals outside core industries. Penalize roles with no data-sharing exposure.
+  outreach_system: "You write concise, privacy-focused B2B emails for Woodway Assurance. Output the complete email only."
+  outreach_extra: |
+    Lead with re-identification risk in anonymized data. Reference EviData as a way to give
+    governance teams defensible metrics. Keep consultative — not alarmist.
+
+research_keywords: '"data governance" OR privacy OR anonymized OR "re-identification" OR "data sharing"'
+
+discover:
+  max_queries: 8
+  results_per_query: 5
+  default_limit: 5
+  search_signals:
+    - '"data governance" OR "chief privacy officer" hiring'
+    - '"anonymized data" OR de-identification OR "re-identification risk"'
+    - '"director of privacy" OR "head of data governance" large enterprise'
+
+apollo:
+  person_titles:
+    - VP Data Governance
+    - Director of Data Governance
+    - Head of Data Governance
+    - Chief Privacy Officer
+    - Director of Privacy
+    - VP AI Governance
+    - Director of Data Protection
+  person_seniorities:
+    - director
+    - vp
+    - c_suite
+  employee_ranges:
+    - "1001,5000"
+    - "5001,10000"
+    - "10001,50000"
+
+pdl:
+  job_title_keywords:
+    - data governance
+    - privacy officer
+    - chief privacy
+    - data sharing
+    - AI governance
+    - head of data governance
+    - data protection
+    - information governance
+  job_company_sizes:
+    - "1001-5000"
+    - "5001-10000"
+    - "10001+"
+  job_title_levels:
+    - director
+    - vp
+    - cxo
+  require_work_email: false
+  filter_industries: false
+  per_page: 25

@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+leads.db
+leads.db-wal
+leads.db-shm
+*.csv
+!samples/*.csv
+.pytest_cache/
+credentials.json
+.gmail_token.json
+logs/

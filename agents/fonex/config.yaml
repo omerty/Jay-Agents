@@ -1,0 +1,117 @@
+name: fonex
+company: FONEX
+product: Optical networking gear (Nokia, Ciena, Smartoptics)
+website: https://www.fonex.com
+tagline: Enterprise optical networking for large organizations and data centres
+
+icp:
+  industries:
+    - federal government
+    - provincial government
+    - crown corporations
+    - data centre providers
+    - large enterprise
+  titles:
+    - Director of Infrastructure
+    - VP Network Operations
+    - CTO
+    - Head of Data Centre
+    - Director of Network Engineering
+  company_size: large
+  geography:
+    primary: Canada
+    secondary: US (Tier 2 & 3 DC providers)
+
+value_props:
+  - Authorized reseller of Nokia, Ciena, and Smartoptics gear
+  - Focus on large enterprise and government in Canada
+  - Optical networking expertise for data centre builds and upgrades
+  - Also reaching Tier 2 and Tier 3 data centre providers in the US
+
+disqualifiers:
+  - Service providers (Rogers, Bell, TELUS, etc.)
+  - Small businesses without data centre or backbone needs
+  - Telecom carriers and ISPs
+
+blocklist:
+  - rogers
+  - bell canada
+  - bell mobility
+  - telus
+  - shaw
+  - cogeco
+  - videotron
+  - freedom mobile
+  - sasktel
+
+outreach_tone: technical, enterprise-focused
+
+prompts:
+  qualify_system: "You qualify B2B sales leads for FONEX (optical networking reseller). Output strict JSON only."
+  qualify_extra: |
+    Jay sells Nokia, Ciena, and Smartoptics optical networking gear. Focus on large enterprise
+    in Canada — federal and provincial governments, crown corporations, data centre providers,
+    and large private-sector infrastructure teams. Also score US Tier 2/3 data centre providers
+    positively when relevant. HARD SKIP telecom service providers (Rogers, Bell, TELUS, Shaw,
+    etc.) — they are not buyers. Score higher for DC expansion, network upgrade, or DWDM signals.
+  outreach_system: "You write technical, enterprise B2B emails for FONEX. Output the complete email only."
+  outreach_extra: |
+    Mention Nokia, Ciena, or Smartoptics only when natural. Focus on optical networking for
+    data centre or backbone upgrades — not consumer telecom.
+
+research_keywords: '"data centre" OR "optical network" OR "network infrastructure" OR DWDM'
+
+discover:
+  max_queries: 10
+  results_per_query: 5
+  default_limit: 5
+  queries:
+    - 'Canada federal government "data centre" OR "network upgrade" optical DWDM'
+    - 'Canada crown corporation "data centre expansion" OR network infrastructure'
+    - 'Canada "director of infrastructure" OR "VP network operations" data centre'
+    - 'Ontario OR Quebec provincial government data centre network project'
+    - 'Canada colocation provider "data centre" expansion optical network'
+    - 'United States "tier 2" OR "tier 3" data center expansion optical networking'
+    - 'US colocation provider DWDM OR "optical network" upgrade'
+    - 'Canada large enterprise "network upgrade" OR backbone optical'
+
+apollo:
+  person_titles:
+    - Director of Infrastructure
+    - VP Network Operations
+    - Head of Data Centre
+    - Director of Network Engineering
+    - CTO
+  person_seniorities:
+    - director
+    - vp
+    - c_suite
+  organization_locations:
+    - Canada
+  employee_ranges:
+    - "501,1000"
+    - "1001,5000"
+    - "5001,10000"
+    - "10001,50000"
+
+pdl:
+  job_title_keywords:
+    - network operations
+    - infrastructure
+    - data centre
+    - data center
+    - network engineering
+    - optical network
+  job_company_sizes:
+    - "501-1000"
+    - "1001-5000"
+    - "5001-10000"
+    - "10001+"
+  job_title_levels:
+    - director
+    - vp
+    - cxo
+  require_work_email: false
+  filter_industries: false
+  per_page: 25
+  location_country: "canada"
