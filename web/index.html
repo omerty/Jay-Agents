@@ -28,15 +28,25 @@
       <div class="gmail-sidebar-status hidden" id="gmail-sidebar-status">
         <span class="dot ok"></span>
         <div class="gmail-sidebar-status-text">
-          <div class="gmail-status-label">Connected</div>
+          <div class="gmail-status-label">Gmail</div>
           <div class="gmail-status-email" id="gmail-sidebar-email"></div>
         </div>
       </div>
       <button class="btn ghost small gmail-sidebar-btn hidden" id="btn-gmail-disconnect-sidebar" type="button">Disconnect Gmail</button>
+      <a class="btn gmail-sidebar-btn hidden" id="btn-ms-sidebar" href="/api/microsoft/oauth/start">Connect Microsoft Email</a>
+      <div class="gmail-sidebar-status hidden" id="ms-sidebar-status">
+        <span class="dot ok"></span>
+        <div class="gmail-sidebar-status-text">
+          <div class="gmail-status-label">Outlook</div>
+          <div class="gmail-status-email" id="ms-sidebar-email"></div>
+        </div>
+      </div>
+      <button class="btn ghost small gmail-sidebar-btn hidden" id="btn-ms-disconnect-sidebar" type="button">Disconnect Outlook</button>
       <div class="health" id="health">
         <span class="health-item" id="health-llm"><span class="dot"></span> <span class="health-label">LLM</span></span>
         <span class="health-item" id="health-contacts"><span class="dot"></span> <span class="health-label">Contacts</span></span>
         <span class="health-item" id="health-gmail"><span class="dot"></span> <span class="health-label">Gmail</span></span>
+        <span class="health-item" id="health-ms"><span class="dot"></span> <span class="health-label">Outlook</span></span>
       </div>
       <div class="user-menu hidden" id="user-menu">
         <span class="user-email" id="user-email"></span>
@@ -56,9 +66,16 @@
         <div class="gmail-header-status hidden" id="gmail-header-status" title="Gmail connected">
           <span class="dot ok"></span>
           <span class="gmail-status-email" id="gmail-header-email"></span>
-          <span class="gmail-status-badge">Connected</span>
+          <span class="gmail-status-badge">Gmail</span>
         </div>
         <button class="btn ghost small hidden" id="btn-gmail-disconnect-header" type="button">Disconnect</button>
+        <a class="btn primary hidden" id="btn-ms-header" href="/api/microsoft/oauth/start">Connect Microsoft Email</a>
+        <div class="gmail-header-status hidden" id="ms-header-status" title="Outlook connected">
+          <span class="dot ok"></span>
+          <span class="gmail-status-email" id="ms-header-email"></span>
+          <span class="gmail-status-badge">Outlook</span>
+        </div>
+        <button class="btn ghost small hidden" id="btn-ms-disconnect-header" type="button">Disconnect</button>
         <button class="btn ghost bell" id="bell-btn" title="Notifications">
           🔔<span class="bell-count hidden" id="bell-count">0</span>
         </button>
@@ -111,6 +128,54 @@
           <div class="gmail-connect-actions">
             <button class="btn ghost" id="btn-gmail-refresh" type="button">Refresh status</button>
             <button class="btn ghost" id="btn-gmail-disconnect-pending" type="button">Disconnect</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card gmail-card ms-card hidden" id="ms-card">
+      <div id="ms-connect-panel" class="hidden">
+        <div class="gmail-connect-row">
+          <div>
+            <div class="actions-title">Microsoft Email</div>
+            <div class="gmail-connect-desc" id="ms-connect-desc">
+              Connect Microsoft 365 / Outlook to create drafts, send outreach, and scan for replies.
+            </div>
+            <div class="gmail-connect-meta" id="ms-connect-meta"></div>
+          </div>
+          <div class="gmail-connect-actions">
+            <a class="btn" id="btn-ms-connect" href="/api/microsoft/oauth/start">Connect Microsoft Email</a>
+          </div>
+        </div>
+      </div>
+      <div id="ms-connected-panel" class="hidden">
+        <div class="gmail-connect-row">
+          <div>
+            <div class="actions-title">Microsoft Email</div>
+            <div class="gmail-connected-row">
+              <span class="gmail-status-badge">Connected</span>
+              <span class="gmail-status-email" id="ms-card-email"></span>
+            </div>
+            <div class="gmail-connect-desc">Drafts, sending, and reply scanning are enabled for this Outlook account.</div>
+          </div>
+          <div class="gmail-connect-actions">
+            <button class="btn ghost" id="btn-ms-disconnect-card" type="button">Disconnect</button>
+          </div>
+        </div>
+      </div>
+      <div id="ms-pending-panel" class="hidden">
+        <div class="gmail-connect-row">
+          <div>
+            <div class="actions-title">Microsoft Email</div>
+            <div class="gmail-connected-row">
+              <span class="gmail-status-badge pending" id="ms-pending-badge">Signed in</span>
+              <span class="gmail-status-email" id="ms-pending-email"></span>
+            </div>
+            <div class="gmail-connect-desc" id="ms-pending-detail"></div>
+          </div>
+          <div class="gmail-connect-actions">
+            <button class="btn ghost" id="btn-ms-refresh" type="button">Refresh status</button>
+            <button class="btn ghost" id="btn-ms-disconnect-pending" type="button">Disconnect</button>
           </div>
         </div>
       </div>
@@ -291,7 +356,9 @@
         <pre id="m-outreach" class="outreach-pre">—</pre>
         <div class="outreach-gmail-bar" id="m-gmail-bar">
           <button class="btn primary" id="m-gmail-import" type="button">Import to Gmail</button>
+          <button class="btn primary hidden" id="m-ms-import" type="button">Import to Outlook</button>
           <a class="btn hidden" id="m-gmail-open" href="#" target="_blank" rel="noopener">Open in Gmail</a>
+          <a class="btn hidden" id="m-ms-open" href="#" target="_blank" rel="noopener">Open in Outlook</a>
           <a class="btn hidden" id="m-linkedin-open" href="#" target="_blank" rel="noopener">Open LinkedIn</a>
           <span class="outreach-gmail-hint" id="m-gmail-hint"></span>
         </div>
@@ -304,6 +371,6 @@
   </div>
 </div>
 
-<script src="app.js?v=15"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>

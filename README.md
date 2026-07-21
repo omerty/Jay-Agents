@@ -102,6 +102,34 @@ For local dev you can use `credentials.json` instead — but hosted deployments 
 
 Flow: daily run creates Gmail drafts for qualified leads → user reviews in dashboard → **Send email…** with confirmation → reply scanner notifies on responses.
 
+## Microsoft 365 / Outlook Integration
+
+Same safety model as Gmail: **drafts only until you confirm send.** You can connect Gmail, Outlook, or both.
+
+### For end users
+
+1. Open the dashboard
+2. Click **Connect Microsoft Email**
+3. Sign in with Microsoft 365 / Outlook and accept permissions
+
+### For the operator (once per deployment)
+
+1. [Azure portal](https://portal.azure.com) → **Microsoft Entra ID** → **App registrations** → **New registration**
+2. Supported account types: multitenant + personal Microsoft accounts (or your org only)
+3. Redirect URI type **Web**: `http://YOUR_HOST:8400/api/microsoft/oauth/callback`
+4. Certificates & secrets → create a **Client secret**
+5. API permissions → Microsoft Graph **delegated**: `User.Read`, `Mail.ReadWrite`, `Mail.Send` (grant admin consent if your tenant requires it)
+6. Set env vars:
+
+```bash
+MICROSOFT_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+MICROSOFT_CLIENT_SECRET=your-client-secret
+# optional — default "common" allows work + personal Microsoft accounts
+#MICROSOFT_TENANT_ID=common
+```
+
+Daily automation prefers Gmail when both mailboxes are connected; otherwise it uses Outlook.
+
 ## Manual CLI (optional)
 
 ```bash

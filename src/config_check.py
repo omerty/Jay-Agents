@@ -5,13 +5,14 @@ import os
 from .contacts import contacts_status
 from .gmail_api import gmail_status
 from .llm import check_llm
+from .microsoft_mail_api import microsoft_status
 
 
 def validate_config() -> dict:
     """Check required services before a daily run or dashboard startup.
 
-    Returns {ok, issues, warnings, llm, contacts, gmail}.
-    *issues* block automation; *warnings* are informational (e.g. Gmail optional).
+    Returns {ok, issues, warnings, llm, contacts, gmail, microsoft}.
+    *issues* block automation; *warnings* are informational (e.g. mail optional).
     """
     issues: list[str] = []
     warnings: list[str] = []
@@ -34,8 +35,16 @@ def validate_config() -> dict:
         issues.append("CONTACTS_PROVIDER=pdl but PDL_API_KEY is missing")
 
     gmail = gmail_status()
-    if not gmail["connected"]:
-        warnings.append(f"Gmail not connected — drafts/replies disabled ({gmail.get('detail')})")
+    microsoft = microsoft_status()
+    if not gmail["connected"] and not microsoft["connected"]:
+        warnings.append(
+            "No mailbox connected — drafts/replies disabled "
+            f"(Gmail: {gmail.get('detail')}; Microsoft: {microsoft.get('detail')})"
+        )
+    elif not gmail["connected"]:
+        warnings.append(f"Gmail not connected ({gmail.get('detail')})")
+    elif not microsoft["connected"]:
+        warnings.append(f"Microsoft Email not connected ({microsoft.get('detail')})")
 
     delay = float(os.getenv("LLM_CALL_DELAY", "0"))
     if llm["ok"] and llm.get("provider") == "groq" and delay < 2.0:
@@ -58,4 +67,5 @@ def validate_config() -> dict:
         "llm": llm,
         "contacts": contacts,
         "gmail": gmail,
+        "microsoft": microsoft,
     }

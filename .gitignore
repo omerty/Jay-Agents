@@ -10,4 +10,7 @@ leads.db-shm
 .pytest_cache/
 credentials.json
 .gmail_token.json
+.gmail_account.json
+.microsoft_token.json
+.microsoft_account.json
 logs/

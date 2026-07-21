@@ -34,10 +34,16 @@ def _now() -> str:
 
 
 def _create_gmail_drafts(agent: str) -> tuple[int, int]:
-    """Create Gmail drafts for drafted leads that have an email but no Gmail draft yet."""
-    from .gmail_api import GmailError, create_draft, gmail_status
+    """Create mailbox drafts for drafted leads that have an email but no draft yet.
 
-    if not gmail_status()["connected"]:
+    Prefers Gmail when connected; otherwise uses Microsoft 365 / Outlook.
+    """
+    from .gmail_api import GmailError, create_draft, gmail_status
+    from .microsoft_mail_api import MicrosoftMailError, create_draft as ms_create_draft, microsoft_status
+
+    use_gmail = gmail_status()["connected"]
+    use_ms = (not use_gmail) and microsoft_status()["connected"]
+    if not use_gmail and not use_ms:
         return 0, 0
 
     created = 0
@@ -48,12 +54,21 @@ def _create_gmail_drafts(agent: str) -> tuple[int, int]:
         if (lead.get("score") or 0) < DRAFT_MIN_SCORE or not lead.get("outreach_body"):
             continue
         try:
-            result = create_draft(
-                lead["email"],
-                lead.get("outreach_subject") or "Quick question",
-                lead["outreach_body"],
-            )
-        except GmailError as e:
+            if use_gmail:
+                result = create_draft(
+                    lead["email"],
+                    lead.get("outreach_subject") or "Quick question",
+                    lead["outreach_body"],
+                )
+                provider = "gmail"
+            else:
+                result = ms_create_draft(
+                    lead["email"],
+                    lead.get("outreach_subject") or "Quick question",
+                    lead["outreach_body"],
+                )
+                provider = "microsoft"
+        except (GmailError, MicrosoftMailError) as e:
             logger.warning("Draft failed for lead %s: %s", lead["id"], e)
             failed += 1
             continue
@@ -62,9 +77,15 @@ def _create_gmail_drafts(agent: str) -> tuple[int, int]:
             gmail_draft_id=result["draft_id"],
             gmail_thread_id=result["thread_id"],
             gmail_message_id=result["message_id"],
+            mail_provider=provider,
         )
         created += 1
-        logger.info("Gmail draft created for %s <%s>", lead.get("contact_name"), lead["email"])
+        logger.info(
+            "%s draft created for %s <%s>",
+            "Gmail" if provider == "gmail" else "Outlook",
+            lead.get("contact_name"),
+            lead["email"],
+        )
     return created, failed
 
 
@@ -132,12 +153,19 @@ def run_daily() -> dict:
     # Reply scan (read-only)
     try:
         from .gmail_api import gmail_status, scan_replies
+        from .microsoft_mail_api import microsoft_status, scan_replies as ms_scan_replies
 
+        reply_bits = []
         if gmail_status()["connected"]:
             scan = scan_replies()
-            summary_parts.append(f"replies: {scan['replies']} new of {scan['checked']} checked")
+            reply_bits.append(f"gmail {scan['replies']} new of {scan['checked']} checked")
+        if microsoft_status()["connected"]:
+            scan = ms_scan_replies()
+            reply_bits.append(f"outlook {scan['replies']} new of {scan['checked']} checked")
+        if reply_bits:
+            summary_parts.append("replies: " + "; ".join(reply_bits))
         else:
-            summary_parts.append("replies: gmail not connected")
+            summary_parts.append("replies: no mailbox connected")
     except Exception as e:
         ok = False
         logger.exception("reply scan failed")

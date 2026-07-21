@@ -84,6 +84,7 @@ body {
 
 /* ---------- gmail connect ---------- */
 .gmail-card { border-color: rgba(255, 176, 46, 0.35); background: linear-gradient(180deg, var(--card), rgba(255, 176, 46, 0.05)); }
+.ms-card { border-color: rgba(0, 120, 212, 0.35); background: linear-gradient(180deg, var(--card), rgba(0, 120, 212, 0.05)); }
 .gmail-card.connected { border-color: rgba(62, 207, 142, 0.35); background: linear-gradient(180deg, var(--card), rgba(62, 207, 142, 0.05)); }
 .gmail-card.pending { border-color: rgba(255, 176, 46, 0.35); background: linear-gradient(180deg, var(--card), rgba(255, 176, 46, 0.05)); }
 .gmail-connect-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }

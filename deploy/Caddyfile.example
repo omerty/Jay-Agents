@@ -34,3 +34,4 @@ jayagents.example.com {
 #   AUTH_ADMIN_SECRET=<openssl rand -hex 32>
 #   AUTH_COOKIE_SECURE=true
 #   GOOGLE_CLIENT redirect URI → https://jayagents.example.com/api/gmail/oauth/callback
+#   MICROSOFT_CLIENT redirect URI → https://jayagents.example.com/api/microsoft/oauth/callback

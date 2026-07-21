@@ -148,7 +148,11 @@ def test_validate_config_with_keys(monkeypatch):
         "src.config_check.gmail_status",
         lambda: {"connected": False, "email": None, "detail": "missing"},
     )
+    monkeypatch.setattr(
+        "src.config_check.microsoft_status",
+        lambda: {"connected": False, "email": None, "detail": "missing"},
+    )
 
     cfg = validate_config()
     assert cfg["ok"] is True
-    assert any("Gmail" in w for w in cfg["warnings"])
+    assert any("mailbox" in w.lower() or "Gmail" in w or "Microsoft" in w for w in cfg["warnings"])

@@ -55,6 +55,18 @@ from .gmail_api import (
     send_draft,
     send_message,
 )
+from .microsoft_mail_api import (
+    MicrosoftMailError,
+    create_draft as ms_create_draft,
+    disconnect_microsoft,
+    microsoft_status,
+    oauth_complete as ms_oauth_complete,
+    oauth_redirect_uri as ms_oauth_redirect_uri,
+    oauth_start as ms_oauth_start,
+    scan_replies as ms_scan_replies,
+    send_draft as ms_send_draft,
+    send_message as ms_send_message,
+)
 from .llm import check_llm
 from .prompts import get_prompt_settings, save_prompt_settings
 
@@ -78,6 +90,7 @@ def _build_health_payload() -> dict:
         "seamless": seamless_status(),
         "actava": actava_status_export(),
         "gmail": gmail_status(),
+        "microsoft": microsoft_status(),
         "config_ok": cfg["ok"],
         "config_issues": cfg["issues"],
         "config_warnings": cfg["warnings"],
@@ -629,6 +642,7 @@ def gmail_create_draft(lead_id: int):
         gmail_draft_id=result["draft_id"],
         gmail_thread_id=result["thread_id"],
         gmail_message_id=result["message_id"],
+        mail_provider="gmail",
     )
     return {"ok": True, **result}
 
@@ -678,8 +692,9 @@ def gmail_send(lead_id: int, body: SendRequest):
         lead_id,
         status="emailed",
         emailed_at=_now(),
-        gmail_thread_id=result["thread_id"],
-        gmail_message_id=result["message_id"],
+        gmail_thread_id=result["thread_id"] or lead.get("gmail_thread_id"),
+        gmail_message_id=result["message_id"] or lead.get("gmail_message_id"),
+        mail_provider="gmail",
     )
     logger.info("Email sent to lead %s (%s)", lead_id, lead["email"])
     return {"ok": True, **result}
@@ -747,6 +762,138 @@ def gmail_setup(request: Request):
         **status,
         "redirect_uri": oauth_redirect_uri(base),
         "credentials_path": CREDENTIALS_PATH.name,
+    }
+
+
+# ---------------------------------------------------------------- microsoft / outlook
+
+
+@app.post("/api/leads/{lead_id}/microsoft-draft")
+def microsoft_create_draft(lead_id: int):
+    """Create an Outlook / Microsoft 365 draft for this lead's outreach. Never sends."""
+    lead = _lead_or_404(lead_id)
+    if not lead.get("email"):
+        raise HTTPException(400, "lead has no email address")
+    if not lead.get("outreach_body"):
+        raise HTTPException(400, "lead has no outreach draft — process it first")
+    try:
+        result = ms_create_draft(
+            lead["email"],
+            lead.get("outreach_subject") or "Quick question",
+            lead["outreach_body"],
+        )
+    except MicrosoftMailError as e:
+        raise HTTPException(503, str(e))
+    set_lead_fields(
+        lead_id,
+        gmail_draft_id=result["draft_id"],
+        gmail_thread_id=result["thread_id"],
+        gmail_message_id=result["message_id"],
+        mail_provider="microsoft",
+    )
+    return {"ok": True, **result}
+
+
+@app.post("/api/leads/{lead_id}/microsoft-send")
+def microsoft_send(lead_id: int, body: SendRequest):
+    """Send the outreach email via Microsoft. Requires confirm=true — the safety gate."""
+    if not body.confirm:
+        raise HTTPException(400, "confirmation required — pass {\"confirm\": true}")
+    lead = _lead_or_404(lead_id)
+    if lead.get("status") in ("emailed", "replied"):
+        raise HTTPException(409, f"lead already {lead['status']} — cannot send again")
+    if not lead.get("email"):
+        raise HTTPException(400, "lead has no email address")
+    try:
+        if lead.get("gmail_draft_id") and lead.get("mail_provider") == "microsoft":
+            result = ms_send_draft(lead["gmail_draft_id"])
+        else:
+            if not lead.get("outreach_body"):
+                raise HTTPException(400, "lead has no outreach draft — process it first")
+            result = ms_send_message(
+                lead["email"],
+                lead.get("outreach_subject") or "Quick question",
+                lead["outreach_body"],
+            )
+    except MicrosoftMailError as e:
+        raise HTTPException(503, str(e))
+    set_lead_fields(
+        lead_id,
+        status="emailed",
+        emailed_at=_now(),
+        gmail_thread_id=result.get("thread_id") or lead.get("gmail_thread_id"),
+        gmail_message_id=result.get("message_id") or lead.get("gmail_message_id"),
+        mail_provider="microsoft",
+    )
+    logger.info("Microsoft email sent to lead %s (%s)", lead_id, lead["email"])
+    return {"ok": True, **result}
+
+
+@app.post("/api/microsoft/scan-replies")
+def microsoft_scan_replies():
+    try:
+        result = ms_scan_replies()
+    except MicrosoftMailError as e:
+        raise HTTPException(503, str(e))
+    from .db import record_run
+
+    record_run(
+        "reply_scan_microsoft",
+        ok=True,
+        summary=f"{result['replies']} new replies of {result['checked']} checked",
+        started_at=_now(),
+    )
+    return result
+
+
+@app.post("/api/microsoft/disconnect")
+def microsoft_disconnect():
+    """Remove stored Microsoft OAuth tokens so the user can connect a different account."""
+    try:
+        return disconnect_microsoft()
+    except MicrosoftMailError as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/microsoft/oauth/start")
+def microsoft_oauth_start(request: Request):
+    """Redirect to Microsoft sign-in — completes via /api/microsoft/oauth/callback."""
+    base = str(request.base_url).rstrip("/")
+    redirect_uri = ms_oauth_redirect_uri(base)
+    try:
+        auth_url, _ = ms_oauth_start(redirect_uri)
+    except MicrosoftMailError as e:
+        raise HTTPException(503, str(e))
+    return RedirectResponse(auth_url)
+
+
+@app.get("/api/microsoft/oauth/callback")
+def microsoft_oauth_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+):
+    if error:
+        return RedirectResponse("/?microsoft=denied")
+    if not code or not state:
+        raise HTTPException(400, "missing OAuth code or state")
+    try:
+        ms_oauth_complete(state, code)
+    except MicrosoftMailError:
+        return RedirectResponse("/?microsoft=error")
+    return RedirectResponse("/?microsoft=connected")
+
+
+@app.get("/api/microsoft/setup")
+def microsoft_setup(request: Request):
+    """OAuth redirect URI to register in Azure AD app registration."""
+    base = str(request.base_url).rstrip("/")
+    status = microsoft_status(force=True)
+    return {
+        **status,
+        "redirect_uri": ms_oauth_redirect_uri(base),
+        "tenant": (os.getenv("MICROSOFT_TENANT_ID") or "common").strip() or "common",
     }
 
 
@@ -818,14 +965,23 @@ def _reply_scan_loop():
     while True:
         time.sleep(REPLY_SCAN_MINUTES * 60)
         try:
-            if not gmail_status()["connected"]:
-                continue
-            result = scan_replies()
-            record_run("reply_scan", ok=True,
-                       summary=f"{result['replies']} new replies of {result['checked']} checked",
-                       started_at=_now())
-            if result["replies"]:
-                logger.info("Reply scan: %s new replies", result["replies"])
+            if gmail_status()["connected"]:
+                result = scan_replies()
+                record_run("reply_scan", ok=True,
+                           summary=f"{result['replies']} new replies of {result['checked']} checked",
+                           started_at=_now())
+                if result["replies"]:
+                    logger.info("Gmail reply scan: %s new replies", result["replies"])
+            if microsoft_status()["connected"]:
+                ms_result = ms_scan_replies()
+                record_run(
+                    "reply_scan_microsoft",
+                    ok=True,
+                    summary=f"{ms_result['replies']} new replies of {ms_result['checked']} checked",
+                    started_at=_now(),
+                )
+                if ms_result["replies"]:
+                    logger.info("Microsoft reply scan: %s new replies", ms_result["replies"])
         except Exception:
             logger.exception("Background reply scan failed")
 

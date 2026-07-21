@@ -122,7 +122,7 @@ def _migrate(conn: sqlite3.Connection):
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(leads)")}
     if "qualification_json" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN qualification_json TEXT")
-    for col in ("gmail_draft_id", "gmail_thread_id", "gmail_message_id", "emailed_at"):
+    for col in ("gmail_draft_id", "gmail_thread_id", "gmail_message_id", "emailed_at", "mail_provider"):
         if col not in cols:
             conn.execute(f"ALTER TABLE leads ADD COLUMN {col} TEXT")
 
@@ -268,6 +268,7 @@ def update_lead_status(lead_id: int, status: str):
 
 _LEAD_FIELD_WHITELIST = {
     "status", "email", "gmail_draft_id", "gmail_thread_id", "gmail_message_id", "emailed_at",
+    "mail_provider",
     "outreach_subject", "outreach_body",
 }
 

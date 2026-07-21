@@ -36,6 +36,7 @@ PUBLIC_API_PATHS = frozenset({
     "/api/auth/signup",
     "/api/health",
     "/api/gmail/oauth/callback",
+    "/api/microsoft/oauth/callback",
 })
 
 

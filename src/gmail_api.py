@@ -446,7 +446,8 @@ def scan_replies() -> dict:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT id, agent, company, contact_name, gmail_thread_id, gmail_message_id "
-            "FROM leads WHERE status = 'emailed' AND gmail_thread_id IS NOT NULL"
+            "FROM leads WHERE status = 'emailed' AND gmail_thread_id IS NOT NULL "
+            "AND COALESCE(mail_provider, 'gmail') = 'gmail'"
         ).fetchall()
 
     svc = _service()

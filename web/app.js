@@ -37,6 +37,7 @@ let agents = [];
 let currentAgent = null;
 let allLeads = [];
 let gmailConnected = false;
+let microsoftConnected = false;
 let hunterAvailable = false;
 let modalLeadId = null;
 let promptDefaults = null;
@@ -61,6 +62,7 @@ async function api(path, opts = {}) {
 
 async function init() {
   handleGmailOAuthReturn();
+  handleMicrosoftOAuthReturn();
   await loadCurrentUser();
   await Promise.all([loadHealth(), loadAgents(), loadNotifications(), loadAutomation()]);
   if (agents.length) selectAgent(agents[0].name);
@@ -144,6 +146,15 @@ function renderStatusBanner(h) {
     items.push({ ok: false, warn: !g.needs_operator_setup, label: "Gmail not connected", detail: g.detail });
   }
 
+  const m = h.microsoft || {};
+  if (m.connected) {
+    items.push({ ok: true, warn: false, label: `Outlook connected`, detail: m.email });
+  } else if (m.authenticated || m.has_token) {
+    items.push({ ok: false, warn: true, label: "Outlook setup incomplete", detail: m.detail });
+  } else {
+    items.push({ ok: false, warn: !m.needs_operator_setup, label: "Outlook not connected", detail: m.detail });
+  }
+
   if (h.config_ok) {
     items.push({ ok: true, warn: false, label: "All systems ready", detail: "Ready for nightly automation" });
   } else if (h.config_issues?.length) {
@@ -210,6 +221,17 @@ async function loadHealth(forceRefresh = false) {
     gEl.querySelector(".health-label").textContent = g.connected && g.email ? `Gmail (${g.email})` : "Gmail";
     gEl.title = g.connected ? `Connected as ${g.email}` : g.detail || "Gmail not connected";
     await updateGmailUI(g);
+
+    const mEl = $("health-ms");
+    const m = h.microsoft || {};
+    microsoftConnected = !!m.connected;
+    if (mEl) {
+      mEl.querySelector(".dot").className = "dot " + (m.connected ? "ok" : "bad");
+      mEl.querySelector(".health-label").textContent = m.connected && m.email ? `Outlook (${m.email})` : "Outlook";
+      mEl.title = m.connected ? `Connected as ${m.email}` : m.detail || "Microsoft Email not connected";
+    }
+    await updateMicrosoftUI(m);
+
     renderStatusBanner(h);
 
     if (h.config_issues?.length) {
@@ -480,6 +502,253 @@ for (const id of GMAIL_DISCONNECT_BTNS) {
   $(id)?.addEventListener("click", disconnectGmail);
 }
 
+/* ---------------- Microsoft / Outlook connect ---------------- */
+
+const MS_CONNECT_BTNS = [
+  "btn-ms-connect",
+  "btn-ms-header",
+  "btn-ms-sidebar",
+];
+
+const MS_DISCONNECT_BTNS = [
+  "btn-ms-disconnect-header",
+  "btn-ms-disconnect-sidebar",
+  "btn-ms-disconnect-pending",
+  "btn-ms-disconnect-card",
+];
+
+function setMsDisconnectButtonsVisible(visible) {
+  for (const id of MS_DISCONNECT_BTNS) {
+    const btn = $(id);
+    if (btn) btn.classList.toggle("hidden", !visible);
+  }
+}
+
+function setMsConnectButtons(enabled) {
+  for (const id of MS_CONNECT_BTNS) {
+    const btn = $(id);
+    if (!btn) continue;
+    if (btn.tagName === "A") {
+      if (enabled) {
+        btn.removeAttribute("aria-disabled");
+        btn.href = "/api/microsoft/oauth/start";
+        btn.classList.remove("disabled");
+      } else {
+        btn.setAttribute("aria-disabled", "true");
+        btn.removeAttribute("href");
+        btn.classList.add("disabled");
+      }
+    } else {
+      btn.disabled = !enabled;
+    }
+  }
+}
+
+function toggleMsConnectButtons(visible) {
+  for (const id of MS_CONNECT_BTNS) {
+    const btn = $(id);
+    if (btn) btn.classList.toggle("hidden", !visible);
+  }
+}
+
+function setMsConnectedEmail(email) {
+  for (const id of ["ms-card-email", "ms-header-email", "ms-sidebar-email"]) {
+    const el = $(id);
+    if (el) el.textContent = email || "";
+  }
+}
+
+function hideAllMsPanels() {
+  for (const id of ["ms-connect-panel", "ms-connected-panel", "ms-pending-panel"]) {
+    const el = $(id);
+    if (el) el.classList.add("hidden");
+  }
+}
+
+function setMsCardVisible(visible) {
+  const card = $("ms-card");
+  if (card) card.classList.toggle("hidden", !visible);
+}
+
+function setMsHeaderSidebarStatus(m, mode) {
+  const sidebar = $("ms-sidebar-status");
+  const header = $("ms-header-status");
+  if (!sidebar || !header) return;
+  const sidebarLabel = sidebar.querySelector(".gmail-status-label");
+  const headerBadge = header.querySelector(".gmail-status-badge");
+  $("btn-ms-sidebar")?.classList.add("hidden");
+  $("btn-ms-header")?.classList.add("hidden");
+  sidebar.classList.remove("hidden");
+  header.classList.remove("hidden");
+  sidebar.classList.toggle("pending", mode === "pending");
+  header.classList.toggle("pending", mode === "pending");
+  if (sidebarLabel) sidebarLabel.textContent = mode === "pending" ? "Signed in" : "Outlook";
+  if (headerBadge) {
+    headerBadge.textContent = mode === "pending" ? "Signed in" : "Outlook";
+    headerBadge.classList.toggle("pending", mode === "pending");
+  }
+  setMsConnectedEmail(m.email);
+  const addr = m.email || "";
+  $("ms-sidebar-email").textContent = addr;
+  $("ms-header-email").textContent = addr;
+}
+
+function showMsConnectedUI(m) {
+  hideAllMsPanels();
+  setMsCardVisible(false);
+  toggleMsConnectButtons(false);
+  setMsDisconnectButtonsVisible(true);
+  setMsHeaderSidebarStatus(m, "connected");
+}
+
+function showMsPendingUI(m) {
+  const pending = $("ms-pending-panel");
+  hideAllMsPanels();
+  if (pending) pending.classList.remove("hidden");
+  const card = $("ms-card");
+  if (card) {
+    card.classList.remove("connected");
+    card.classList.add("pending");
+  }
+  setMsCardVisible(true);
+  toggleMsConnectButtons(false);
+  setMsDisconnectButtonsVisible(true);
+  setMsHeaderSidebarStatus(m, "pending");
+  const badge = $("ms-pending-badge");
+  const email = $("ms-pending-email");
+  const detail = $("ms-pending-detail");
+  if (badge) badge.textContent = "Signed in";
+  if (email) email.textContent = m.email || "";
+  if (detail) detail.textContent = m.detail || "Finishing Microsoft Email setup…";
+}
+
+function showMsDisconnectedUI() {
+  const connect = $("ms-connect-panel");
+  hideAllMsPanels();
+  if (connect) connect.classList.remove("hidden");
+  const card = $("ms-card");
+  if (card) {
+    card.classList.remove("connected", "pending");
+  }
+  setMsCardVisible(true);
+  toggleMsConnectButtons(true);
+  setMsDisconnectButtonsVisible(false);
+  $("btn-ms-sidebar")?.classList.remove("hidden");
+  $("ms-sidebar-status")?.classList.add("hidden");
+  $("btn-ms-header")?.classList.remove("hidden");
+  $("ms-header-status")?.classList.add("hidden");
+}
+
+async function updateMicrosoftUI(m) {
+  const card = $("ms-card");
+  const meta = $("ms-connect-meta");
+  const mEl = $("health-ms");
+  if (!card) return;
+
+  if (m.connected) {
+    showMsConnectedUI(m);
+    if (mEl) {
+      mEl.querySelector(".dot").className = "dot ok";
+      mEl.querySelector(".health-label").textContent = m.email ? `Outlook (${m.email})` : "Outlook";
+      mEl.title = `Connected as ${m.email}`;
+    }
+    return;
+  }
+
+  if (m.authenticated || m.has_token) {
+    showMsPendingUI(m);
+    if (mEl) {
+      mEl.querySelector(".dot").className = "dot bad";
+      mEl.querySelector(".health-label").textContent = m.email ? `Outlook (${m.email})` : "Outlook (signed in)";
+      mEl.title = m.detail || "Microsoft signed in but not fully connected";
+    }
+    return;
+  }
+
+  showMsDisconnectedUI();
+
+  if (m.can_connect === false && !m.needs_operator_setup) {
+    const headerBtn = $("btn-ms-header");
+    if (headerBtn && headerBtn.tagName === "A") {
+      headerBtn.href = "/api/microsoft/oauth/start";
+    }
+  }
+
+  if (m.needs_operator_setup) {
+    if ($("ms-connect-desc")) {
+      $("ms-connect-desc").textContent =
+        "Microsoft Email isn't configured on this server yet. Your administrator needs to set it up once.";
+    }
+    if (meta) {
+      meta.innerHTML =
+        "End users only need to click <b>Connect Microsoft Email</b> once the server is configured. " +
+        "Ask your admin to add MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET.";
+    }
+    setMsConnectButtons(false);
+    return;
+  }
+
+  if ($("ms-connect-desc")) {
+    $("ms-connect-desc").textContent =
+      "Connect Microsoft 365 / Outlook to create drafts, send outreach, and scan for replies.";
+  }
+  try {
+    const setup = await api("/api/microsoft/setup");
+    if (meta && setup.redirect_uri) {
+      meta.innerHTML = `Redirect URI for Azure: <code>${esc(setup.redirect_uri)}</code>`;
+    }
+  } catch {
+    if (meta) meta.textContent = "";
+  }
+  setMsConnectButtons(true);
+}
+
+function handleMicrosoftOAuthReturn() {
+  const params = new URLSearchParams(location.search);
+  const result = params.get("microsoft");
+  if (!result) return;
+  const msgs = {
+    connected: "Microsoft sign-in complete — checking Outlook status…",
+    denied: "Microsoft Email connection was cancelled.",
+    error: "Microsoft Email connection failed — try again.",
+  };
+  showToast(msgs[result] || "Microsoft Email connection finished.", result === "connected");
+  history.replaceState({}, "", location.pathname);
+  loadHealth(true);
+}
+
+$("btn-ms-refresh")?.addEventListener("click", () => loadHealth(true));
+
+async function disconnectMicrosoft() {
+  const ok = confirm(
+    "Disconnect Microsoft Email from JayAgents?\n\nYou'll need to sign in again to create Outlook drafts, send outreach, or scan for replies."
+  );
+  if (!ok) return;
+
+  for (const id of MS_DISCONNECT_BTNS) {
+    const btn = $(id);
+    if (btn) btn.disabled = true;
+  }
+
+  try {
+    await api("/api/microsoft/disconnect", { method: "POST" });
+    microsoftConnected = false;
+    showToast("Microsoft Email disconnected — you can connect a different account anytime.");
+    await loadHealth(true);
+  } catch (e) {
+    showToast(e.message, false);
+  } finally {
+    for (const id of MS_DISCONNECT_BTNS) {
+      const btn = $(id);
+      if (btn) btn.disabled = false;
+    }
+  }
+}
+
+for (const id of MS_DISCONNECT_BTNS) {
+  $(id)?.addEventListener("click", disconnectMicrosoft);
+}
+
 async function loadAgents() {
   agents = await api("/api/agents");
   renderNav();
@@ -704,8 +973,22 @@ $("btn-scan-replies").onclick = async () => {
   btn.disabled = true;
   btn.textContent = "Scanning…";
   try {
-    const r = await api("/api/gmail/scan-replies", { method: "POST" });
-    btn.textContent = r.replies ? `${r.replies} new replies!` : "No new replies";
+    let replies = 0;
+    let checked = 0;
+    if (gmailConnected) {
+      const r = await api("/api/gmail/scan-replies", { method: "POST" });
+      replies += r.replies || 0;
+      checked += r.checked || 0;
+    }
+    if (microsoftConnected) {
+      const r = await api("/api/microsoft/scan-replies", { method: "POST" });
+      replies += r.replies || 0;
+      checked += r.checked || 0;
+    }
+    if (!gmailConnected && !microsoftConnected) {
+      throw new Error("Connect Gmail or Microsoft Email first");
+    }
+    btn.textContent = replies ? `${replies} new replies!` : "No new replies";
     await Promise.all([loadNotifications(), loadLeads(), refreshStats(), loadAutomation()]);
   } catch (e) {
     btn.textContent = "Scan replies now";
@@ -1002,6 +1285,11 @@ function gmailDraftUrl(draftId) {
   return `https://mail.google.com/mail/u/0/#drafts?compose=${encodeURIComponent(draftId)}`;
 }
 
+function outlookDraftUrl(draftId, webLink) {
+  if (webLink) return webLink;
+  return `https://outlook.office.com/mail/deeplink/read/${encodeURIComponent(draftId)}`;
+}
+
 async function importLeadToGmail(lead) {
   const result = await api(`/api/leads/${lead.id}/gmail-draft`, { method: "POST" });
   showToast(`Draft saved to Gmail as ${result.sender || "you"} — review and send from Gmail`, true);
@@ -1013,14 +1301,34 @@ async function importLeadToGmail(lead) {
   return result;
 }
 
+async function importLeadToOutlook(lead) {
+  const result = await api(`/api/leads/${lead.id}/microsoft-draft`, { method: "POST" });
+  showToast(`Draft saved to Outlook as ${result.sender || "you"} — review and send from Outlook`, true);
+  if (result.outlook_url) {
+    window.open(result.outlook_url, "_blank", "noopener");
+  }
+  await openModal(lead.id);
+  loadLeads();
+  return result;
+}
+
 function renderOutreachGmailActions(l) {
   const bar = $("m-gmail-bar");
   const importBtn = $("m-gmail-import");
+  const msImportBtn = $("m-ms-import");
   const openBtn = $("m-gmail-open");
+  const msOpenBtn = $("m-ms-open");
   const linkedinBtn = $("m-linkedin-open");
   const hint = $("m-gmail-hint");
   const hasOutreach = !!(l.outreach_body || l.outreach_subject);
   const channel = l.contact_channel || (l.email ? "email" : l.linkedin_url ? "linkedin" : "incomplete");
+
+  const hideMailBtns = () => {
+    importBtn.classList.add("hidden");
+    msImportBtn?.classList.add("hidden");
+    openBtn.classList.add("hidden");
+    msOpenBtn?.classList.add("hidden");
+  };
 
   if (!hasOutreach) {
     bar.classList.add("hidden");
@@ -1029,8 +1337,7 @@ function renderOutreachGmailActions(l) {
   bar.classList.remove("hidden");
 
   if (channel === "linkedin" && l.linkedin_url) {
-    importBtn.classList.add("hidden");
-    openBtn.classList.add("hidden");
+    hideMailBtns();
     linkedinBtn.classList.remove("hidden");
     linkedinBtn.href = normalizeUrl(l.linkedin_url);
     const hunterHint = l.can_hunter_research
@@ -1043,50 +1350,79 @@ function renderOutreachGmailActions(l) {
   linkedinBtn.classList.add("hidden");
 
   if (!l.email || !String(l.email).includes("@")) {
+    hideMailBtns();
     importBtn.classList.remove("hidden");
-    openBtn.classList.add("hidden");
     importBtn.disabled = true;
     importBtn.textContent = "Import to Gmail";
-    hint.textContent = l.contact_message || "This lead needs a contact email before importing to Gmail.";
+    hint.textContent = l.contact_message || "This lead needs a contact email before importing to email.";
     importBtn.onclick = null;
-    return;
-  }
-
-  if (!gmailConnected) {
-    importBtn.classList.remove("hidden");
-    openBtn.classList.add("hidden");
-    importBtn.disabled = true;
-    importBtn.textContent = "Import to Gmail";
-    hint.textContent = "Connect Gmail first — creates a draft only, nothing is sent.";
-    importBtn.onclick = null;
+    if (msImportBtn) msImportBtn.onclick = null;
     return;
   }
 
   if (l.gmail_draft_id) {
-    importBtn.classList.add("hidden");
-    openBtn.classList.remove("hidden");
-    openBtn.href = gmailDraftUrl(l.gmail_draft_id);
-    hint.textContent = "Draft is in Gmail — open it there to review and send.";
+    hideMailBtns();
+    const isMs = (l.mail_provider || "gmail") === "microsoft";
+    if (isMs && msOpenBtn) {
+      msOpenBtn.classList.remove("hidden");
+      msOpenBtn.href = outlookDraftUrl(l.gmail_draft_id, l.outlook_url);
+      hint.textContent = "Draft is in Outlook — open it there to review and send.";
+    } else {
+      openBtn.classList.remove("hidden");
+      openBtn.href = gmailDraftUrl(l.gmail_draft_id);
+      hint.textContent = "Draft is in Gmail — open it there to review and send.";
+    }
     return;
   }
 
-  importBtn.classList.remove("hidden");
-  openBtn.classList.add("hidden");
-  importBtn.disabled = false;
-  importBtn.textContent = "Import to Gmail";
-  hint.textContent = "Creates a draft in your Gmail. You send it from Gmail when ready.";
-
-  importBtn.onclick = async () => {
+  if (!gmailConnected && !microsoftConnected) {
+    hideMailBtns();
+    importBtn.classList.remove("hidden");
     importBtn.disabled = true;
-    importBtn.textContent = "Importing…";
-    try {
-      await importLeadToGmail(l);
-    } catch (e) {
-      showToast(e.message, false);
-      importBtn.disabled = false;
-      importBtn.textContent = "Import to Gmail";
-    }
-  };
+    importBtn.textContent = "Import to Gmail";
+    hint.textContent = "Connect Gmail or Microsoft Email first — creates a draft only, nothing is sent.";
+    importBtn.onclick = null;
+    if (msImportBtn) msImportBtn.onclick = null;
+    return;
+  }
+
+  hideMailBtns();
+  const bits = [];
+  if (gmailConnected) {
+    importBtn.classList.remove("hidden");
+    importBtn.disabled = false;
+    importBtn.textContent = "Import to Gmail";
+    importBtn.onclick = async () => {
+      importBtn.disabled = true;
+      importBtn.textContent = "Importing…";
+      try {
+        await importLeadToGmail(l);
+      } catch (e) {
+        showToast(e.message, false);
+        importBtn.disabled = false;
+        importBtn.textContent = "Import to Gmail";
+      }
+    };
+    bits.push("Gmail");
+  }
+  if (microsoftConnected && msImportBtn) {
+    msImportBtn.classList.remove("hidden");
+    msImportBtn.disabled = false;
+    msImportBtn.textContent = "Import to Outlook";
+    msImportBtn.onclick = async () => {
+      msImportBtn.disabled = true;
+      msImportBtn.textContent = "Importing…";
+      try {
+        await importLeadToOutlook(l);
+      } catch (e) {
+        showToast(e.message, false);
+        msImportBtn.disabled = false;
+        msImportBtn.textContent = "Import to Outlook";
+      }
+    };
+    bits.push("Outlook");
+  }
+  hint.textContent = `Creates a draft in your ${bits.join(" or ")}. You send it from your mailbox when ready.`;
 }
 
 function normalizeUrl(u) {
