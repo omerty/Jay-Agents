@@ -43,8 +43,12 @@ let promptDefaults = null;
 
 const $ = (id) => document.getElementById(id);
 
-async function api(path, opts) {
-  const r = await fetch(path, opts);
+async function api(path, opts = {}) {
+  const r = await fetch(path, { credentials: "include", ...opts });
+  if (r.status === 401) {
+    window.location.href = "/login.html";
+    throw new Error("Sign in required");
+  }
   if (!r.ok) {
     let detail = r.statusText;
     try { detail = (await r.json()).detail || detail; } catch {}
@@ -57,11 +61,31 @@ async function api(path, opts) {
 
 async function init() {
   handleGmailOAuthReturn();
+  await loadCurrentUser();
   await Promise.all([loadHealth(), loadAgents(), loadNotifications(), loadAutomation()]);
   if (agents.length) selectAgent(agents[0].name);
   setInterval(() => loadHealth(), 120000);
   setInterval(loadNotifications, 60000);
   setInterval(loadAutomation, 300000);
+}
+
+async function loadCurrentUser() {
+  const menu = $("user-menu");
+  const logoutBtn = $("btn-logout");
+  if (!menu || !logoutBtn) return;
+  try {
+    const user = await api("/api/auth/me");
+    $("user-email").textContent = user.email;
+    menu.classList.remove("hidden");
+    logoutBtn.onclick = async () => {
+      try {
+        await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+      } catch {}
+      window.location.href = "/login.html";
+    };
+  } catch {
+    menu.classList.add("hidden");
+  }
 }
 
 function showToast(msg, ok = true) {
@@ -508,6 +532,7 @@ $("notif-mark-read").onclick = async () => {
 /* ---------------- agent actions ---------------- */
 
 let activeJobPoll = null;
+let activeJobId = null;
 
 const RUN_LABELS = {
   requalify_all: "Re-qualify all",
@@ -546,18 +571,31 @@ function renderJobPanel(job, label) {
   const title = $("job-title");
   const status = $("job-status");
   const logEl = $("job-log");
+  const cancelBtn = $("btn-cancel-job");
   if (!panel || !title || !status || !logEl) return;
 
   panel.classList.remove("hidden");
   title.textContent = label || "Agent task";
-  status.textContent = job.status === "running" ? "Running…" : job.status === "done" ? "Complete" : "Failed";
+  const statusText = {
+    running: "Running…",
+    done: "Complete",
+    error: "Failed",
+    cancelled: "Cancelled",
+  };
+  status.textContent = statusText[job.status] || job.status || "Running…";
   status.className = "job-status " + (job.status || "running");
   logEl.textContent = (job.log || []).map((e) => e.msg).join("\n") || "Starting…";
   logEl.scrollTop = logEl.scrollHeight;
+  if (cancelBtn) {
+    cancelBtn.classList.toggle("hidden", job.status !== "running");
+    cancelBtn.disabled = !!job.cancel_requested;
+    cancelBtn.textContent = job.cancel_requested ? "Cancelling…" : "Cancel";
+  }
 }
 
 async function pollJob(jobId, label) {
   if (activeJobPoll) clearInterval(activeJobPoll);
+  activeJobId = jobId;
   return new Promise((resolve) => {
     const tick = async () => {
       try {
@@ -566,10 +604,13 @@ async function pollJob(jobId, label) {
         if (job.status !== "running") {
           clearInterval(activeJobPoll);
           activeJobPoll = null;
+          activeJobId = null;
           setActionButtonsDisabled(false);
           if (job.status === "done") {
             showToast(job.log?.at(-1)?.msg || "Task complete", true);
             await Promise.all([loadLeads(), refreshStats(), loadAgents().then(() => renderNav())]);
+          } else if (job.status === "cancelled") {
+            showToast("Task cancelled", false);
           } else {
             showToast(job.error || "Task failed", false);
           }
@@ -578,6 +619,7 @@ async function pollJob(jobId, label) {
       } catch (e) {
         clearInterval(activeJobPoll);
         activeJobPoll = null;
+        activeJobId = null;
         setActionButtonsDisabled(false);
         showToast(e.message, false);
         resolve(null);
@@ -587,6 +629,21 @@ async function pollJob(jobId, label) {
     activeJobPoll = setInterval(tick, 3000);
   });
 }
+
+async function cancelActiveJob() {
+  if (!activeJobId) return;
+  const btn = $("btn-cancel-job");
+  if (btn) btn.disabled = true;
+  try {
+    await api(`/api/jobs/${activeJobId}/cancel`, { method: "POST" });
+    showToast("Cancel requested…", false);
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    showToast(e.message, false);
+  }
+}
+
+$("btn-cancel-job")?.addEventListener("click", cancelActiveJob);
 
 async function runAgentAction(mode, { limit } = {}) {
   if (!currentAgent) return;
@@ -628,7 +685,10 @@ async function loadAutomation() {
       const ok = a.last_daily_run.ok ? "✓" : "✗ failed";
       meta.push(`<span class="chip"><b>Last nightly run:</b> ${fmtDateTime(a.last_daily_run.finished_at)} ${ok}</span>`);
     } else {
-      meta.push(`<span class="chip"><b>Last nightly run:</b> not yet scheduled</span>`);
+      meta.push(`<span class="chip"><b>Last nightly run:</b> not yet run</span>`);
+    }
+    if (a.schedule) {
+      meta.push(`<span class="chip"><b>Schedule:</b> ${esc(a.schedule)}</span>`);
     }
     if (a.last_reply_scan) {
       meta.push(`<span class="chip"><b>Last reply scan:</b> ${fmtDateTime(a.last_reply_scan.finished_at)} (${esc(a.last_reply_scan.summary || "")})</span>`);

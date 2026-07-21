@@ -14,11 +14,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import env  # noqa: F401 — loads .env
+from . import auth
 from .agent import load_agent, run_discover_workflow, run_process_imported, run_requalify_all, run_workflow
 from .config_check import validate_config
 from .contact_channel import enrich_lead
@@ -101,11 +102,38 @@ app = FastAPI(title="JayAgents Dashboard", lifespan=_lifespan)
 WEB_DIR = Path(__file__).parent.parent / "web"
 AGENT_NAMES = ["woodway", "fonex", "keira"]
 
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if not auth.auth_enabled():
+        return await call_next(request)
+
+    path = request.url.path.rstrip("/") or "/"
+
+    if path.startswith("/api/"):
+        if auth.is_public_api(path):
+            return await call_next(request)
+        user = auth.user_from_request(request)
+        if not user:
+            return JSONResponse({"detail": "Authentication required"}, status_code=401)
+        request.state.user = user
+        return await call_next(request)
+
+    if path in ("", "/", "/index.html") and request.method == "GET":
+        if not auth.user_from_request(request):
+            return RedirectResponse("/login.html")
+
+    return await call_next(request)
+
 # ---------------------------------------------------------------- jobs
 
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
 MAX_FINISHED_JOBS = 50
+
+
+class JobCancelled(Exception):
+    """Raised when a background job receives a cancel request."""
 
 
 def _now() -> str:
@@ -131,6 +159,7 @@ def _new_job(agent: str, kind: str) -> str:
             "agent": agent,
             "kind": kind,
             "status": "running",
+            "cancel_requested": False,
             "log": [],
             "result": None,
             "error": None,
@@ -145,10 +174,30 @@ def _job_log(job_id: str, msg: str):
         JOBS[job_id]["log"].append({"t": _now(), "msg": msg})
 
 
-def _finish_job(job_id: str, *, result=None, error=None):
+def _check_cancelled(job_id: str):
+    with JOBS_LOCK:
+        if JOBS.get(job_id, {}).get("cancel_requested"):
+            raise JobCancelled()
+
+
+def _make_job_logger(job_id: str):
+    def log(msg: str = ""):
+        _check_cancelled(job_id)
+        if msg:
+            _job_log(job_id, msg)
+
+    return log
+
+
+def _finish_job(job_id: str, *, result=None, error=None, cancelled: bool = False):
     with JOBS_LOCK:
         job = JOBS[job_id]
-        job["status"] = "error" if error else "done"
+        if cancelled:
+            job["status"] = "cancelled"
+        elif error:
+            job["status"] = "error"
+        else:
+            job["status"] = "done"
         job["result"] = result
         job["error"] = error
         job["finished_at"] = _now()
@@ -163,7 +212,11 @@ def _run_in_thread(job_id: str, fn):
     def runner():
         try:
             result = fn()
+            _check_cancelled(job_id)
             _finish_job(job_id, result=result)
+        except JobCancelled:
+            _job_log(job_id, "Cancelled by user")
+            _finish_job(job_id, cancelled=True)
         except Exception as e:  # surface to UI
             logger.exception("Job %s failed", job_id)
             _job_log(job_id, f"Error: {e}")
@@ -203,6 +256,92 @@ def _agent_summary(name: str) -> dict:
 # ---------------------------------------------------------------- API
 
 
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class SignupRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    otp: str = Field(min_length=4, max_length=64)
+    password: str = Field(min_length=10, max_length=256)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=10, max_length=256)
+
+
+class InviteRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    user = auth.user_from_request(request)
+    if not user:
+        raise HTTPException(401, "Not signed in")
+    return user
+
+
+@app.post("/api/auth/login")
+def auth_login(body: LoginRequest):
+    try:
+        result = auth.login(body.email, body.password)
+    except auth.AuthError as e:
+        raise HTTPException(401, str(e)) from e
+    response = JSONResponse({"ok": True, "user": result["user"]})
+    auth.set_session_cookie(response, result["session_id"])
+    return response
+
+
+@app.post("/api/auth/signup")
+def auth_signup(body: SignupRequest):
+    try:
+        result = auth.signup(body.email, body.otp, body.password)
+    except auth.AuthError as e:
+        raise HTTPException(400, str(e)) from e
+    response = JSONResponse({"ok": True, "user": result["user"]})
+    auth.set_session_cookie(response, result["session_id"])
+    return response
+
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request):
+    auth.logout(request.cookies.get(auth.SESSION_COOKIE))
+    response = JSONResponse({"ok": True})
+    auth.clear_session_cookie(response)
+    return response
+
+
+@app.post("/api/auth/password")
+def auth_change_password(body: ChangePasswordRequest, request: Request):
+    user = auth.user_from_request(request)
+    if not user:
+        raise HTTPException(401, "Not signed in")
+    try:
+        auth.change_password(user["id"], body.current_password, body.new_password)
+    except auth.AuthError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True}
+
+
+@app.post("/api/auth/admin/invite")
+def auth_admin_invite(body: InviteRequest, request: Request):
+    if not auth.verify_admin_bearer(request.headers.get("authorization")):
+        raise HTTPException(401, "Invalid admin token")
+    try:
+        result = auth.create_invite(body.email)
+    except auth.AuthError as e:
+        raise HTTPException(400, str(e)) from e
+    return {
+        "ok": True,
+        "email": result["email"],
+        "otp": result["otp"],
+        "expires_in_hours": result["expires_in_hours"],
+    }
+
+
 @app.get("/api/health")
 def health(refresh: bool = False):
     global _health_cache, _health_cache_at
@@ -220,8 +359,10 @@ def automation():
     """Schedule status for the dashboard: last daily run + reply-scan info."""
     daily = last_run("daily")
     scan = last_run("reply_scan")
+    hour = int(os.getenv("DAILY_CRON_HOUR", "0"))
     return {
-        "schedule": "daily at 00:00 via cron (scripts/setup_cron.sh)",
+        "schedule": f"daily at {hour:02d}:00 local time via cron (scripts/setup_cron.sh)",
+        "cron_hour": hour,
         "last_daily_run": daily,
         "last_reply_scan": scan,
     }
@@ -304,7 +445,7 @@ def run_agent(agent: str, body: RunRequest):
                 raise HTTPException(503, f"{key} not set — add it to .env")
 
     job_id = _new_job(agent, body.mode)
-    log = lambda msg: _job_log(job_id, msg)
+    log = _make_job_logger(job_id)
 
     if body.mode == "discover":
         def work():
@@ -442,6 +583,19 @@ def job_status(job_id: str):
         if not job:
             raise HTTPException(404, "unknown job")
         return dict(job)
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            raise HTTPException(404, "unknown job")
+        if job["status"] != "running":
+            raise HTTPException(409, f"job is already {job['status']}")
+        job["cancel_requested"] = True
+    _job_log(job_id, "Cancel requested…")
+    return {"ok": True, "job_id": job_id}
 
 
 # ---------------------------------------------------------------- gmail

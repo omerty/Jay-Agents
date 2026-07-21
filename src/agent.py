@@ -12,6 +12,16 @@ AGENTS_DIR = Path(__file__).parent.parent / "agents"
 PROCESS_DELAY = float(os.getenv("PROCESS_DELAY", os.getenv("LLM_CALL_DELAY", "2.5")))
 
 
+def _interruptible_sleep(seconds: float, emit):
+    """Sleep in short chunks so cancel requests are picked up promptly."""
+    if seconds <= 0:
+        return
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        emit("")
+        time.sleep(min(0.5, end - time.monotonic()))
+
+
 def load_agent(name: str) -> dict:
     config_path = AGENTS_DIR / name / "config.yaml"
     if not config_path.exists():
@@ -128,7 +138,7 @@ def run_process_imported(
             failed.append({"lead_id": lead.get("id"), "company": lead.get("company"), "error": str(e)})
             emit(f"Failed {who}: {e}")
         if i < len(pending) and PROCESS_DELAY > 0:
-            time.sleep(PROCESS_DELAY)
+            _interruptible_sleep(PROCESS_DELAY, emit)
 
     processed.sort(key=lambda x: x["qualification"]["score"], reverse=True)
     return {
@@ -185,7 +195,7 @@ def run_requalify_all(
             failed.append({"lead_id": lead.get("id"), "company": lead.get("company"), "error": str(e)})
             emit(f"Failed {who}: {e}")
         if i < len(pending) and REQUALIFY_DELAY > 0:
-            time.sleep(REQUALIFY_DELAY)
+            _interruptible_sleep(REQUALIFY_DELAY, emit)
 
     processed.sort(key=lambda x: x["qualification"]["score"], reverse=True)
     return {

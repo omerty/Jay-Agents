@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install (or update) the JayAgents daily cron job.
-# Usage: ./scripts/setup_cron.sh [HOUR]   — default HOUR=0 (midnight)
+# Usage: ./scripts/setup_cron.sh [HOUR]   — default HOUR=0 (midnight local time)
 
 set -euo pipefail
 
@@ -22,7 +22,7 @@ CRON_LINE="0 $HOUR * * * $CRON_CMD"
 # Replace any existing src.daily entry, keep everything else
 ( crontab -l 2>/dev/null | grep -v 'src\.daily' ; echo "$CRON_LINE" ) | crontab -
 
-echo "Installed cron job — agents run daily at $(printf '%02d' "$HOUR"):00"
+echo "Installed cron job — all agents (Woodway, FONEX, Keira) run daily at $(printf '%02d' "$HOUR"):00 local time"
 echo "  $CRON_LINE"
 echo
 echo "Logs:    $LOG_DIR/daily.log"

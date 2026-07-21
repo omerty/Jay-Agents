@@ -144,6 +144,8 @@ def wait_for_session(
     last_heartbeat = started
 
     while time.monotonic() < deadline:
+        if on_progress:
+            on_progress("")
         session = get_session(session_id)
         status = _session_status(session)
         if status != last_status:

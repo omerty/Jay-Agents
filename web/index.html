@@ -38,6 +38,10 @@
         <span class="health-item" id="health-contacts"><span class="dot"></span> <span class="health-label">Contacts</span></span>
         <span class="health-item" id="health-gmail"><span class="dot"></span> <span class="health-label">Gmail</span></span>
       </div>
+      <div class="user-menu hidden" id="user-menu">
+        <span class="user-email" id="user-email"></span>
+        <button class="btn ghost small" id="btn-logout" type="button">Sign out</button>
+      </div>
     </div>
   </aside>
 
@@ -150,7 +154,10 @@
       <div class="job-panel hidden" id="job-panel">
         <div class="job-head">
           <span class="job-title" id="job-title">Running…</span>
-          <span class="job-status" id="job-status"></span>
+          <div class="job-head-actions">
+            <span class="job-status" id="job-status"></span>
+            <button class="btn ghost small hidden" id="btn-cancel-job" type="button">Cancel</button>
+          </div>
         </div>
         <pre class="job-log" id="job-log"></pre>
       </div>
@@ -297,6 +304,6 @@
   </div>
 </div>
 
-<script src="app.js?v=13"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>

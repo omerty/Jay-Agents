@@ -3,7 +3,8 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture()
-def client(tmp_db):
+def client(tmp_db, monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     from src.web import app
 
     return TestClient(app)
@@ -367,3 +368,44 @@ def test_agent_prompts_get_and_update(client, tmp_path, monkeypatch):
     assert r.json()["values"]["qualify_extra"] == "Be strict on geography."
 
     assert client.get("/api/agents/nope/prompts").status_code == 404
+
+
+def test_cancel_running_job(client, tmp_db, monkeypatch):
+    import src.agent as agent_mod
+    import time
+
+    def slow_requalify(*args, **kwargs):
+        emit = kwargs.get("on_progress") or (lambda msg: None)
+        for i in range(30):
+            emit(f"step {i}")
+            time.sleep(0.2)
+        return {
+            "processed": [],
+            "count": 0,
+            "failed": [],
+            "failed_count": 0,
+            "mode": "requalify_all",
+        }
+
+    monkeypatch.setattr(agent_mod, "run_requalify_all", slow_requalify)
+    started = client.post(
+        "/api/agents/woodway/run",
+        json={"mode": "requalify_all", "limit": 10, "mock": True},
+    )
+    assert started.status_code == 200
+    job_id = started.json()["job_id"]
+
+    cancel = client.post(f"/api/jobs/{job_id}/cancel")
+    assert cancel.status_code == 200
+
+    deadline = time.time() + 5
+    status = "running"
+    while time.time() < deadline:
+        job = client.get(f"/api/jobs/{job_id}").json()
+        status = job["status"]
+        if status != "running":
+            break
+        time.sleep(0.1)
+
+    assert status == "cancelled"
+    assert client.post(f"/api/jobs/{job_id}/cancel").status_code == 409

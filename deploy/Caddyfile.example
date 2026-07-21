@@ -1,0 +1,36 @@
+# Example Caddy reverse proxy for JayAgents
+# Replace jayagents.example.com with your domain. Point DNS A record to the VPS.
+#
+# Install: https://caddyserver.com/docs/install
+# Run:     sudo caddy run --config /etc/caddy/Caddyfile
+#
+# JayAgents listens on 127.0.0.1:8400 (WEB_HOST=127.0.0.1 in .env — bind localhost only;
+# Caddy is the only public entrypoint).
+
+jayagents.example.com {
+    encode gzip
+
+    # Automatic HTTPS via Let's Encrypt
+    reverse_proxy 127.0.0.1:8400
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+}
+
+# Optional extras (not shown):
+# - IP allowlist via Caddy `remote_ip` matchers
+# - Rate limiting via Cloudflare, nginx limit_req, or fail2ban on the VPS
+# - App-level login is handled by JayAgents (see AUTH_* in .env)
+
+# App .env on the server:
+#   WEB_HOST=127.0.0.1
+#   WEB_PORT=8400
+#   AUTH_ENABLED=true
+#   AUTH_SESSION_SECRET=<openssl rand -hex 32>
+#   AUTH_ADMIN_SECRET=<openssl rand -hex 32>
+#   AUTH_COOKIE_SECURE=true
+#   GOOGLE_CLIENT redirect URI → https://jayagents.example.com/api/gmail/oauth/callback

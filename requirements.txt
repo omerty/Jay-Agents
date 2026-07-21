@@ -5,6 +5,7 @@ ddgs>=9.0
 python-dotenv>=1.0
 fastapi>=0.110
 uvicorn>=0.29
+bcrypt>=4.0
 google-api-python-client>=2.100
 google-auth>=2.23
 google-auth-oauthlib>=1.1

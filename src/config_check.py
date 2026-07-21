@@ -43,6 +43,14 @@ def validate_config() -> dict:
             "Groq free tier: set LLM_CALL_DELAY=2.5 in .env to avoid rate limits during daily runs"
         )
 
+    from .auth import auth_enabled
+
+    if auth_enabled():
+        if not (os.getenv("AUTH_SESSION_SECRET") or os.getenv("AUTH_ADMIN_SECRET")):
+            warnings.append("AUTH_ENABLED but AUTH_SESSION_SECRET is not set — auth will fail on signup/login")
+        if not os.getenv("AUTH_ADMIN_SECRET"):
+            warnings.append("AUTH_ADMIN_SECRET is not set — you cannot create user invites")
+
     return {
         "ok": not issues,
         "issues": issues,

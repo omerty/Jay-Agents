@@ -85,6 +85,33 @@ def init_db():
                 started_at TEXT NOT NULL,
                 finished_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_login_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS invites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL COLLATE NOCASE,
+                otp_hash TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_invites_email ON invites(email);
+
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
             """)
             _migrate(conn)
         _initialized_paths.add(key)
@@ -379,6 +406,110 @@ def export_csv(path: str | Path, agent: str = "woodway") -> int:
         w.writeheader()
         w.writerows(leads)
     return len(leads)
+
+
+# ---------------------------------------------------------------- auth
+
+
+def get_user_by_email(email: str) -> dict | None:
+    init_db()
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE email = ? COLLATE NOCASE",
+            (email.strip(),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_user_by_id(user_id: int) -> dict | None:
+    init_db()
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def create_user(email: str, password_hash: str) -> dict:
+    init_db()
+    now = _now()
+    with get_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO users (email, password_hash, created_at) VALUES (?, ?, ?)",
+            (email.strip().lower(), password_hash, now),
+        )
+        user_id = cur.lastrowid
+        conn.commit()
+    user = get_user_by_id(user_id)
+    assert user is not None
+    return user
+
+
+def touch_user_login(user_id: int):
+    init_db()
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE users SET last_login_at = ? WHERE id = ?",
+            (_now(), user_id),
+        )
+        conn.commit()
+
+
+def create_invite_row(email: str, otp_hash: str, expires_at: str) -> int:
+    init_db()
+    with get_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO invites (email, otp_hash, expires_at, used, created_at) VALUES (?, ?, ?, 0, ?)",
+            (email.strip().lower(), otp_hash, expires_at, _now()),
+        )
+        conn.commit()
+    return cur.lastrowid
+
+
+def find_valid_invite(email: str, otp_hash: str) -> dict | None:
+    init_db()
+    now = _now()
+    with get_connection() as conn:
+        row = conn.execute(
+            """SELECT * FROM invites
+               WHERE email = ? COLLATE NOCASE AND otp_hash = ? AND used = 0 AND expires_at > ?
+               ORDER BY created_at DESC LIMIT 1""",
+            (email.strip(), otp_hash, now),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def mark_invite_used(invite_id: int):
+    init_db()
+    with get_connection() as conn:
+        conn.execute("UPDATE invites SET used = 1 WHERE id = ?", (invite_id,))
+        conn.commit()
+
+
+def create_session_row(session_id: str, user_id: int, expires_at: str):
+    init_db()
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+            (session_id, user_id, expires_at, _now()),
+        )
+        conn.commit()
+
+
+def get_session_row(session_id: str) -> dict | None:
+    init_db()
+    now = _now()
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM sessions WHERE id = ? AND expires_at > ?",
+            (session_id, now),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def delete_session_row(session_id: str):
+    init_db()
+    with get_connection() as conn:
+        conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        conn.commit()
 
 
 def build_prospect_string(lead: dict) -> str:
