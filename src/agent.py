@@ -12,6 +12,12 @@ AGENTS_DIR = Path(__file__).parent.parent / "agents"
 PROCESS_DELAY = float(os.getenv("PROCESS_DELAY", os.getenv("LLM_CALL_DELAY", "2.5")))
 
 
+def _batch_delay() -> float:
+    from .llm_optimize import process_delay_seconds
+
+    return process_delay_seconds()
+
+
 def _interruptible_sleep(seconds: float, emit):
     """Sleep in short chunks so cancel requests are picked up promptly."""
     if seconds <= 0:
@@ -108,6 +114,8 @@ def run_process_imported(
     *,
     limit: int = 10,
     use_llm: bool = True,
+    require_contact: bool = False,
+    require_identity: bool | None = None,
     on_progress=None,
 ) -> dict:
     from .db import get_leads_by_statuses
@@ -115,11 +123,16 @@ def run_process_imported(
 
     emit = on_progress or (lambda msg: None)
     config = load_agent(agent_name)
-    pending = get_leads_by_statuses(["imported"], agent=agent_name, limit=limit)
+    identity_gate = require_identity if require_identity is not None else require_contact
+    pending = get_leads_by_statuses(
+        ["imported"], agent=agent_name, limit=limit, require_identity=identity_gate
+    )
     emit(f"{len(pending)} imported contacts pending")
 
     processed = []
     failed = []
+    skipped = 0
+    delay = _batch_delay()
     for i, row in enumerate(pending, 1):
         lead = dict(row)
         who = lead.get("contact_name") or lead.get("company", "lead")
@@ -132,13 +145,16 @@ def run_process_imported(
                 agent_name=agent_name,
                 save=True,
             )
+            if result.get("skipped"):
+                skipped += 1
+                continue
             processed.append({**lead, **result})
         except Exception as e:
             logger.exception("Failed to process lead %s (%s)", lead.get("id"), who)
             failed.append({"lead_id": lead.get("id"), "company": lead.get("company"), "error": str(e)})
             emit(f"Failed {who}: {e}")
-        if i < len(pending) and PROCESS_DELAY > 0:
-            _interruptible_sleep(PROCESS_DELAY, emit)
+        if i < len(pending) and delay > 0:
+            _interruptible_sleep(delay, emit)
 
     processed.sort(key=lambda x: x["qualification"]["score"], reverse=True)
     return {
@@ -146,6 +162,7 @@ def run_process_imported(
         "mode": "process_imported",
         "processed": processed,
         "count": len(processed),
+        "skipped": skipped,
         "failed": failed,
         "failed_count": len(failed),
     }

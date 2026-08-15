@@ -114,20 +114,20 @@ def test_search_and_import_discover_cura_mock(tmp_db, monkeypatch):
     monkeypatch.setattr("src.actava.cura_chat_json", FakeCura.cura_chat_json)
 
     result = search_and_import_actava("keira", limit=5)
-    assert result["mode"] == "discover+cura"
+    assert result["mode"] == "discover+cura_or_anthropic"
     assert result["imported"] == 1
 
 
 def test_search_and_import_agent_mock(tmp_db, monkeypatch):
     monkeypatch.setenv("ACTAVA_API_KEY", "ak_live_test")
-    monkeypatch.setenv("ACTAVA_AGENT_ID", "agent-abc")
+    monkeypatch.setenv("ACTAVA_AGENT_ID_KEIRA", "agent-abc")
 
     def fake_run(agent_id, message, *, extra=None, on_progress=None):
         assert agent_id == "agent-abc"
         if on_progress:
             on_progress("Actava run started")
         return {
-            "output_text": '{"leads": [{"company": "Leblanc HVAC", "contact_name": "Robert Leblanc", "contact_title": "Owner", "signal": "long-tenured owner"}]}'
+            "output_text": '{"leads": [{"company": "Leblanc Manufacturing", "contact_name": "Robert Leblanc", "contact_title": "Owner", "signal": "long-tenured owner"}]}'
         }
 
     monkeypatch.setattr("src.actava.run_agent_and_wait", fake_run)
@@ -135,3 +135,47 @@ def test_search_and_import_agent_mock(tmp_db, monkeypatch):
     result = search_and_import_actava("keira", limit=3)
     assert result["mode"] == "agent"
     assert result["imported"] == 1
+
+
+def test_keira_skips_shared_woodway_actava_agent(monkeypatch):
+    from src.actava import _actava_agent_id_for
+
+    monkeypatch.setenv("ACTAVA_API_KEY", "ak_live_test")
+    monkeypatch.setenv("ACTAVA_AGENT_ID", "woodway-agent")
+    monkeypatch.delenv("ACTAVA_AGENT_ID_KEIRA", raising=False)
+    monkeypatch.setenv("KEIRA_USE_SHARED_ACTAVA_AGENT", "false")
+    assert _actava_agent_id_for("keira") == ""
+    assert _actava_agent_id_for("woodway") == "woodway-agent"
+    monkeypatch.setenv("ACTAVA_AGENT_ID_KEIRA", "keira-agent")
+    assert _actava_agent_id_for("keira") == "keira-agent"
+
+
+def test_keira_uses_shared_actava_by_default(monkeypatch):
+    from src.actava import _actava_agent_id_for
+
+    monkeypatch.setenv("ACTAVA_API_KEY", "ak_live_test")
+    monkeypatch.setenv("ACTAVA_AGENT_ID", "shared-agent")
+    monkeypatch.delenv("ACTAVA_AGENT_ID_KEIRA", raising=False)
+    monkeypatch.delenv("KEIRA_USE_SHARED_ACTAVA_AGENT", raising=False)
+    assert _actava_agent_id_for("keira") == "shared-agent"
+
+
+def test_company_names_match_blocks_kroon_pollution():
+    from src.seamless import company_names_match
+
+    assert company_names_match("Kroon", "Kroon")
+    assert not company_names_match("Kroon", "Kroonpress As")
+    assert not company_names_match("Kroon", "Kroon Kliniek")
+    assert company_names_match("Asco Construction Ltd.", "Asco Construction")
+    assert company_names_match("Terlin Construction", "Terlin Construction Inc")
+
+
+def test_salvage_truncated_actava_json():
+    from src.actava import _parse_leads_json
+
+    truncated = (
+        '{"leads":[{"company":"Denoco Energy Systems","contact_name":"Lucas",'
+        '"signal":"second generation"},{"company":"Half Done","signal":"unterminated'
+    )
+    leads = _parse_leads_json(truncated)
+    assert any(l.get("company") == "Denoco Energy Systems" for l in leads)

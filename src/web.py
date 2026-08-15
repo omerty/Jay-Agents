@@ -4,6 +4,7 @@ Run:  python -m src.web   →  http://localhost:8400
 """
 
 import logging
+import json
 import os
 import tempfile
 import threading
@@ -26,20 +27,35 @@ from .contact_channel import enrich_lead
 from .contacts import ContactsError, contacts_status, hunter_research_lead, resolve_contacts_provider, search_and_import_contacts
 from .seamless import seamless_status
 from .seamless_api import seamless_available
+from .seamless_oauth import (
+    SeamlessOAuthError,
+    disconnect as disconnect_seamless,
+    oauth_client_ready as seamless_oauth_client_ready,
+    oauth_complete as seamless_oauth_complete,
+    oauth_redirect_uri as seamless_oauth_redirect_uri,
+    oauth_start as seamless_oauth_start,
+)
 from .actava import actava_status_export
 from .actava_api import actava_available
+from .woodway_pipeline import woodway_company_discovery_mode
 from .db import (
     STATUSES,
+    add_suppression,
     export_csv,
     get_connection,
+    get_evidence,
     get_lead,
     get_leads,
     get_notifications,
+    get_review_queue,
     init_db,
     last_run,
+    list_signals,
+    list_suppression,
     mark_notifications_read,
     set_lead_fields,
     stats,
+    today_stats,
     update_lead_status,
 )
 from .gmail_api import (
@@ -400,7 +416,11 @@ def lead_detail(lead_id: int):
         row = conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
     if not row:
         raise HTTPException(404, "lead not found")
-    return enrich_lead(dict(row))
+    lead = enrich_lead(dict(row))
+    lead["evidence"] = get_evidence(entity_id=lead_id) or get_evidence(company=lead.get("company"))
+    from .sequences import get_sequence_steps
+    lead["sequence_steps"] = get_sequence_steps(lead_id)
+    return lead
 
 
 class StatusUpdate(BaseModel):
@@ -421,7 +441,7 @@ def set_lead_status(lead_id: int, body: StatusUpdate):
 
 
 class RunRequest(BaseModel):
-    mode: str  # discover | process_imported | requalify_all | single | contact_search | pdl_search
+    mode: str  # discover | process_imported | requalify_all | single | contact_search | pdl_search | woodway_pipeline | keira_pipeline
     prospect: str | None = Field(default=None, max_length=300)
     limit: int = Field(default=5, ge=1, le=500)
     mock: bool = False
@@ -435,22 +455,41 @@ def run_agent(agent: str, body: RunRequest):
         raise HTTPException(409, "a job is already running for this agent")
 
     use_llm = not body.mock
-    if use_llm and body.mode in ("discover", "process_imported", "requalify_all", "single"):
+    if use_llm and body.mode in (
+        "discover", "process_imported", "requalify_all", "single",
+        "woodway_pipeline", "keira_pipeline",
+    ):
         llm = check_llm()
-        if not llm["ok"]:
+        if not llm["ok"] and not llm.get("fallback"):
             raise HTTPException(503, f"LLM unavailable: {llm['detail']} — fix it or use Demo mode (mock)")
 
     # Validate before creating the job — an early HTTPException must not leave
     # a phantom "running" job that blocks the agent
-    if body.mode not in ("discover", "process_imported", "requalify_all", "single", "contact_search", "pdl_search"):
+    if body.mode not in (
+        "discover", "process_imported", "requalify_all", "single",
+        "contact_search", "pdl_search", "woodway_pipeline", "keira_pipeline",
+    ):
         raise HTTPException(400, f"unknown mode: {body.mode}")
     if body.mode == "single" and not (body.prospect and body.prospect.strip()):
         raise HTTPException(400, "prospect required for single mode")
+    if body.mode == "woodway_pipeline":
+        if agent != "woodway":
+            raise HTTPException(400, "woodway_pipeline is only available for Woodway")
+        if woodway_company_discovery_mode() == "actava" and not actava_available():
+            raise HTTPException(
+                503,
+                "ACTAVA_API_KEY not set — set WOODWAY_COMPANY_DISCOVERY=anthropic (default) or add Actava key",
+            )
+    if body.mode == "keira_pipeline":
+        if agent != "keira":
+            raise HTTPException(400, "keira_pipeline is only available for Keira")
     if body.mode in ("contact_search", "pdl_search"):
-        if agent == "keira" and seamless_available():
-            pass
-        elif agent == "keira" and actava_available():
-            pass
+        if agent == "woodway" and (
+            woodway_company_discovery_mode() == "anthropic" or actava_available()
+        ):
+            pass  # Woodway contact button runs the full pipeline
+        elif agent == "keira" and (seamless_available() or actava_available()):
+            pass  # Keira contact button runs keira_pipeline
         else:
             c = contacts_status()
             if not c["configured"]:
@@ -541,6 +580,60 @@ def run_agent(agent: str, body: RunRequest):
                 "lead_id": result.get("lead_id"),
             }
 
+    elif body.mode == "woodway_pipeline" or (
+        body.mode in ("contact_search", "pdl_search") and agent == "woodway" and (
+            woodway_company_discovery_mode() == "anthropic" or actava_available()
+        )
+    ):
+        def work():
+            from .woodway_pipeline import run_woodway_pipeline, woodway_contact_discovery_mode
+
+            contact_mode = woodway_contact_discovery_mode()
+            contact_label = {
+                "seamless": "Seamless contacts",
+                "web": "web contacts",
+                "paid": "paid contacts",
+            }.get(contact_mode, "contacts")
+            log(
+                f"Woodway pipeline — Claude companies → {contact_label} "
+                f"→ qualify → Outlook drafts…"
+            )
+            result = run_woodway_pipeline(
+                limit=body.limit if body.limit and body.limit != 5 else 50,
+                use_llm=use_llm,
+                create_drafts=True,
+                on_progress=log,
+            )
+            drafts = (result.get("steps") or {}).get("drafts") or {}
+            log(
+                f"Pipeline complete — {drafts.get('created', 0)} "
+                f"{drafts.get('provider') or 'mailbox'} draft(s) ready to send"
+            )
+            return result
+
+    elif body.mode == "keira_pipeline" or (
+        body.mode in ("contact_search", "pdl_search")
+        and agent == "keira"
+        and (seamless_available() or actava_available())
+    ):
+        def work():
+            from .keira_pipeline import run_keira_pipeline
+
+            log("Keira pipeline — company-first gates → Seamless contacts for survivors → drafts…")
+            result = run_keira_pipeline(
+                limit=body.limit,
+                use_llm=use_llm,
+                create_drafts=True,
+                on_progress=log,
+            )
+            drafts = (result.get("steps") or {}).get("drafts") or {}
+            gates = (result.get("steps") or {}).get("gates") or {}
+            log(
+                f"Pipeline complete — {gates.get('survivors', 0)} survivors, "
+                f"{drafts.get('created', 0)} draft(s)"
+            )
+            return result
+
     else:  # contact_search (pdl_search kept as legacy alias)
         def work():
             if agent == "keira" and seamless_available():
@@ -578,9 +671,11 @@ def run_agent(agent: str, body: RunRequest):
                 f"Done — {result.get('imported', 0)} imported, "
                 f"{result.get('skipped', 0)} skipped"
             )
+            if result.get("with_email") is not None:
+                summary += f", {result['with_email']} with email"
             if provider == "apollo":
-                summary += f", {result.get('with_email', 0)} with email (search was free)"
-            else:
+                summary += " (search was free)"
+            elif result.get("credits_used") is not None:
                 summary += f" ({result.get('credits_used', 0)} PDL credits used)"
             log(summary)
             return result
@@ -897,6 +992,56 @@ def microsoft_setup(request: Request):
     }
 
 
+@app.post("/api/seamless/disconnect")
+def seamless_disconnect():
+    try:
+        disconnect_seamless()
+        return {"ok": True, "connected": False, "disconnected": True}
+    except SeamlessOAuthError as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/seamless/oauth/start")
+def seamless_oauth_start_route(request: Request):
+    """Redirect to Seamless sign-in — uses your web account credits via OAuth."""
+    base = str(request.base_url).rstrip("/")
+    redirect_uri = seamless_oauth_redirect_uri(base)
+    try:
+        auth_url, _ = seamless_oauth_start(redirect_uri)
+    except SeamlessOAuthError as e:
+        raise HTTPException(503, str(e))
+    return RedirectResponse(auth_url)
+
+
+@app.get("/api/seamless/oauth/callback")
+def seamless_oauth_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+):
+    if error:
+        return RedirectResponse("/?seamless=denied")
+    if not code or not state:
+        raise HTTPException(400, "missing OAuth code or state")
+    try:
+        seamless_oauth_complete(state, code)
+    except SeamlessOAuthError:
+        return RedirectResponse("/?seamless=error")
+    return RedirectResponse("/?seamless=connected")
+
+
+@app.get("/api/seamless/setup")
+def seamless_setup_route(request: Request):
+    base = str(request.base_url).rstrip("/")
+    status = seamless_status()
+    return {
+        **status,
+        "redirect_uri": seamless_oauth_redirect_uri(base),
+        "oauth_configured": seamless_oauth_client_ready(),
+        "can_connect": seamless_oauth_client_ready() and not status.get("connected"),
+    }
+
+
 # ---------------------------------------------------------------- notifications
 
 
@@ -927,10 +1072,12 @@ def export(agent: str):
 
 
 class PromptUpdate(BaseModel):
-    qualify_system: str | None = Field(default=None, max_length=4000)
-    qualify_extra: str | None = Field(default=None, max_length=4000)
-    outreach_system: str | None = Field(default=None, max_length=4000)
-    outreach_extra: str | None = Field(default=None, max_length=4000)
+    qualify_system: str | None = Field(default=None, max_length=12000)
+    qualify_extra: str | None = Field(default=None, max_length=8000)
+    outreach_system: str | None = Field(default=None, max_length=12000)
+    outreach_extra: str | None = Field(default=None, max_length=8000)
+    analyst_system: str | None = Field(default=None, max_length=12000)
+    critic_system: str | None = Field(default=None, max_length=12000)
 
 
 @app.get("/api/agents/{agent}/prompts")
@@ -945,6 +1092,194 @@ def update_agent_prompts(agent: str, body: PromptUpdate):
     if agent not in AGENT_NAMES:
         raise HTTPException(404, "unknown agent")
     return save_prompt_settings(agent, body.model_dump())
+
+
+@app.get("/api/agents/{agent}/today")
+def agent_today(agent: str):
+    if agent not in AGENT_NAMES:
+        raise HTTPException(404, "unknown agent")
+    from .run_costs import cost_dashboard
+    return {"today": today_stats(agent), "costs": cost_dashboard(agent)}
+
+
+@app.get("/api/agents/{agent}/signals")
+def agent_signals(agent: str, days: int = 7):
+    if agent not in AGENT_NAMES:
+        raise HTTPException(404, "unknown agent")
+    from .signals import SIGNAL_TYPES
+    rows = list_signals(agent, days=days, limit=100)
+    for r in rows:
+        meta = SIGNAL_TYPES.get(r.get("signal_type", ""), {})
+        r["label"] = meta.get("label", r.get("signal_type"))
+    return {"signals": rows, "count": len(rows)}
+
+
+@app.get("/api/agents/{agent}/review-queue")
+def agent_review_queue(agent: str, limit: int = 50):
+    if agent not in AGENT_NAMES:
+        raise HTTPException(404, "unknown agent")
+    return [enrich_lead(l) for l in get_review_queue(agent, limit=limit)]
+
+
+class ReviewAction(BaseModel):
+    action: str  # approve | reject | regenerate
+
+
+@app.post("/api/leads/{lead_id}/review")
+def lead_review_action(lead_id: int, body: ReviewAction):
+    lead = get_lead(lead_id)
+    if not lead:
+        raise HTTPException(404, "lead not found")
+    if body.action == "approve":
+        update_lead_status(lead_id, "drafted")
+    elif body.action == "reject":
+        update_lead_status(lead_id, "skipped")
+    elif body.action == "regenerate":
+        from .agent import load_agent
+        from .pipeline import process_lead
+        cfg = load_agent(lead["agent"])
+        process_lead(cfg, dict(lead), save=True, agent_name=lead["agent"])
+    else:
+        raise HTTPException(422, "action must be approve, reject, or regenerate")
+    return {"ok": True}
+
+
+@app.get("/api/agents/{agent}/suppression")
+def agent_suppression_list(agent: str):
+    if agent not in AGENT_NAMES:
+        raise HTTPException(404, "unknown agent")
+    return {"entries": list_suppression(agent)}
+
+
+class SuppressionAdd(BaseModel):
+    identifier: str
+    scope: str = "email"
+    reason: str = ""
+
+
+@app.post("/api/agents/{agent}/suppression")
+def agent_suppression_add(agent: str, body: SuppressionAdd):
+    if agent not in AGENT_NAMES:
+        raise HTTPException(404, "unknown agent")
+    add_suppression(body.identifier, scope=body.scope, reason=body.reason, agent=agent)
+    return {"ok": True}
+
+
+@app.get("/api/agents/{agent}/negative-list")
+def agent_negative_list(agent: str):
+    from .negative_list import load_negative_list
+    return load_negative_list(agent)
+
+
+class NegativeListUpdate(BaseModel):
+    names: list[str] = []
+    patterns: list[str] = []
+
+
+@app.put("/api/agents/{agent}/negative-list")
+def update_negative_list(agent: str, body: NegativeListUpdate):
+    import yaml
+    path = Path(__file__).parent.parent / "agents" / agent / "config.yaml"
+    if not path.exists():
+        raise HTTPException(404, "unknown agent")
+    with open(path) as f:
+        cfg = yaml.safe_load(f) or {}
+    cfg["negative_list"] = {"names": body.names, "patterns": body.patterns}
+    with open(path, "w") as f:
+        yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
+    return {"ok": True}
+
+
+@app.get("/api/compliance/privacy-posture")
+def privacy_posture():
+    from fastapi.responses import PlainTextResponse
+    from .compliance import privacy_posture_markdown
+    return PlainTextResponse(privacy_posture_markdown(), media_type="text/markdown")
+
+
+class DsarRequest(BaseModel):
+    email: str
+    action: str = "export"  # export | delete
+
+
+@app.post("/api/compliance/dsar")
+def compliance_dsar(body: DsarRequest):
+    from .compliance import dsar_delete, dsar_export
+    if body.action == "delete":
+        n = dsar_delete(body.email)
+        return {"deleted": n}
+    return dsar_export(body.email)
+
+
+@app.post("/api/leads/{lead_id}/actava-deep-dive")
+def actava_deep_dive(lead_id: int):
+    """Run Actava deep report on a high-priority account."""
+    lead = get_lead(lead_id)
+    if not lead:
+        raise HTTPException(404, "lead not found")
+    if not actava_available():
+        raise HTTPException(503, "Actava not configured")
+    from .actava import run_actava_for_company
+    try:
+        report = run_actava_for_company(lead["company"], agent=lead.get("agent", "woodway"))
+    except Exception as e:
+        raise HTTPException(502, str(e)) from e
+    set_lead_fields(lead_id, qualification_json=json.dumps(report) if isinstance(report, dict) else str(report)[:8000])
+    return {"ok": True, "report": report}
+
+
+class ClassifyReplyRequest(BaseModel):
+    body: str = ""
+
+
+@app.post("/api/leads/{lead_id}/classify-reply")
+def classify_lead_reply(lead_id: int, body: ClassifyReplyRequest):
+    from .reply_classify import process_reply_for_lead
+    lead = get_lead(lead_id)
+    if not lead:
+        raise HTTPException(404, "lead not found")
+    return process_reply_for_lead(lead_id, body.body, agent=lead.get("agent", "woodway"))
+
+
+@app.get("/api/agents/{agent}/funnel")
+def agent_funnel(agent: str):
+    from .funnel_metrics import latest_funnel, live_funnel_snapshot
+    return {
+        "live": live_funnel_snapshot(agent),
+        "runs": latest_funnel(agent, limit=10),
+    }
+
+
+class QaRequest(BaseModel):
+    action: str
+    notes: str | None = None
+    edited_subject: str | None = None
+    edited_body: str | None = None
+
+
+@app.get("/api/agents/{agent}/qa-queue")
+def agent_qa_queue(agent: str, limit: int = 25):
+    from .qa import list_qa_queue
+    return {"leads": list_qa_queue(agent, limit=limit)}
+
+
+@app.post("/api/leads/{lead_id}/qa")
+def lead_qa(lead_id: int, body: QaRequest):
+    from .qa import record_qa
+    lead = get_lead(lead_id)
+    if not lead:
+        raise HTTPException(404, "lead not found")
+    result = record_qa(
+        lead_id,
+        body.action,
+        agent=lead.get("agent", "woodway"),
+        notes=body.notes,
+        edited_subject=body.edited_subject,
+        edited_body=body.edited_body,
+    )
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "qa failed")
+    return result
 
 
 # Static frontend (mounted last so /api wins)

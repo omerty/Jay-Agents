@@ -71,6 +71,28 @@ tail -f logs/daily.log         # watch the runs
 
 Tune with `DAILY_CONTACT_LIMIT`, `DAILY_PROCESS_LIMIT`, `DAILY_DRAFT_MIN_SCORE` in `.env`.
 
+## Woodway pipeline
+
+Woodway’s primary flow is company-first, then people, then Outlook drafts:
+
+1. **Web + Claude** (default) — DuckDuckGo search + Anthropic extracts target companies (~1–2 min)
+   - Or set `WOODWAY_COMPANY_DISCOVERY=actava` to use a published Actava agent instead (slow)
+2. **Digest** — LLM keeps the best ICP fits
+3. **Seamless** — find privacy/governance contacts at those companies (falls back to Apollo/PDL if Seamless isn’t configured yet)
+4. **Qualify + outreach** — generate email copy
+5. **Microsoft 365 drafts** — create Outlook drafts (nothing auto-sends)
+
+In the dashboard (Woodway agent), click **Woodway pipeline**. Or run:
+
+```bash
+# via API
+curl -X POST http://localhost:8400/api/agents/woodway/run \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"woodway_pipeline","limit":10}'
+```
+
+Requires `ANTHROPIC_API_KEY` (or Groq). Optional: `ACTAVA_API_KEY` + `ACTAVA_AGENT_ID` if using Actava discovery, `SEAMLESS_API_KEY`, and a connected Microsoft mailbox.
+
 ## Gmail Integration
 
 The agent **drafts emails into your Gmail but never sends anything without your explicit confirmation.** Once you send, it watches the thread and notifies you in the dashboard when the prospect replies.

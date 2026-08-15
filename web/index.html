@@ -42,6 +42,7 @@
         </div>
       </div>
       <button class="btn ghost small gmail-sidebar-btn hidden" id="btn-ms-disconnect-sidebar" type="button">Disconnect Outlook</button>
+      <a class="btn gmail-sidebar-btn hidden" id="btn-seamless-sidebar" href="/api/seamless/oauth/start">Connect Seamless</a>
       <div class="health" id="health">
         <span class="health-item" id="health-llm"><span class="dot"></span> <span class="health-label">LLM</span></span>
         <span class="health-item" id="health-contacts"><span class="dot"></span> <span class="health-label">Contacts</span></span>
@@ -60,22 +61,9 @@
       <div>
         <h1 id="agent-title">—</h1>
         <p id="agent-tagline" class="tagline">—</p>
+        <div class="icp-strip" id="icp-strip"></div>
       </div>
       <div class="header-actions">
-        <a class="btn primary hidden" id="btn-gmail-header" href="/api/gmail/oauth/start">Connect Gmail</a>
-        <div class="gmail-header-status hidden" id="gmail-header-status" title="Gmail connected">
-          <span class="dot ok"></span>
-          <span class="gmail-status-email" id="gmail-header-email"></span>
-          <span class="gmail-status-badge">Gmail</span>
-        </div>
-        <button class="btn ghost small hidden" id="btn-gmail-disconnect-header" type="button">Disconnect</button>
-        <a class="btn primary hidden" id="btn-ms-header" href="/api/microsoft/oauth/start">Connect Microsoft Email</a>
-        <div class="gmail-header-status hidden" id="ms-header-status" title="Outlook connected">
-          <span class="dot ok"></span>
-          <span class="gmail-status-email" id="ms-header-email"></span>
-          <span class="gmail-status-badge">Outlook</span>
-        </div>
-        <button class="btn ghost small hidden" id="btn-ms-disconnect-header" type="button">Disconnect</button>
         <button class="btn ghost bell" id="bell-btn" title="Notifications">
           🔔<span class="bell-count hidden" id="bell-count">0</span>
         </button>
@@ -83,103 +71,15 @@
       </div>
     </header>
 
+    <!-- Keep IDs for existing JS; connections live in Settings -->
+    <a class="hidden" id="btn-gmail-header" href="/api/gmail/oauth/start"></a>
+    <div class="hidden" id="gmail-header-status"><span class="gmail-status-email" id="gmail-header-email"></span></div>
+    <button class="hidden" id="btn-gmail-disconnect-header" type="button"></button>
+    <a class="hidden" id="btn-ms-header" href="/api/microsoft/oauth/start"></a>
+    <div class="hidden" id="ms-header-status"><span class="gmail-status-email" id="ms-header-email"></span></div>
+    <button class="hidden" id="btn-ms-disconnect-header" type="button"></button>
+
     <section class="status-banner hidden" id="status-banner"></section>
-
-    <section class="card gmail-card hidden" id="gmail-card">
-      <div id="gmail-connect-panel" class="hidden">
-        <div class="gmail-connect-row">
-          <div>
-            <div class="actions-title">Gmail</div>
-            <div class="gmail-connect-desc" id="gmail-connect-desc">
-              Connect your Gmail to create drafts, send outreach, and scan for replies.
-            </div>
-            <div class="gmail-connect-meta" id="gmail-connect-meta"></div>
-          </div>
-          <div class="gmail-connect-actions">
-            <a class="btn" id="btn-gmail-connect" href="/api/gmail/oauth/start">Connect Gmail</a>
-          </div>
-        </div>
-      </div>
-      <div id="gmail-connected-panel" class="hidden">
-        <div class="gmail-connect-row">
-          <div>
-            <div class="actions-title">Gmail</div>
-            <div class="gmail-connected-row">
-              <span class="gmail-status-badge">Connected</span>
-              <span class="gmail-status-email" id="gmail-card-email"></span>
-            </div>
-            <div class="gmail-connect-desc">Drafts, sending, and reply scanning are enabled for this account.</div>
-          </div>
-          <div class="gmail-connect-actions">
-            <button class="btn ghost" id="btn-gmail-disconnect-card" type="button">Disconnect</button>
-          </div>
-        </div>
-      </div>
-      <div id="gmail-pending-panel" class="hidden">
-        <div class="gmail-connect-row">
-          <div>
-            <div class="actions-title">Gmail</div>
-            <div class="gmail-connected-row">
-              <span class="gmail-status-badge pending" id="gmail-pending-badge">Signed in</span>
-              <span class="gmail-status-email" id="gmail-pending-email"></span>
-            </div>
-            <div class="gmail-connect-desc" id="gmail-pending-detail"></div>
-          </div>
-          <div class="gmail-connect-actions">
-            <button class="btn ghost" id="btn-gmail-refresh" type="button">Refresh status</button>
-            <button class="btn ghost" id="btn-gmail-disconnect-pending" type="button">Disconnect</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="card gmail-card ms-card hidden" id="ms-card">
-      <div id="ms-connect-panel" class="hidden">
-        <div class="gmail-connect-row">
-          <div>
-            <div class="actions-title">Microsoft Email</div>
-            <div class="gmail-connect-desc" id="ms-connect-desc">
-              Connect Microsoft 365 / Outlook to create drafts, send outreach, and scan for replies.
-            </div>
-            <div class="gmail-connect-meta" id="ms-connect-meta"></div>
-          </div>
-          <div class="gmail-connect-actions">
-            <a class="btn" id="btn-ms-connect" href="/api/microsoft/oauth/start">Connect Microsoft Email</a>
-          </div>
-        </div>
-      </div>
-      <div id="ms-connected-panel" class="hidden">
-        <div class="gmail-connect-row">
-          <div>
-            <div class="actions-title">Microsoft Email</div>
-            <div class="gmail-connected-row">
-              <span class="gmail-status-badge">Connected</span>
-              <span class="gmail-status-email" id="ms-card-email"></span>
-            </div>
-            <div class="gmail-connect-desc">Drafts, sending, and reply scanning are enabled for this Outlook account.</div>
-          </div>
-          <div class="gmail-connect-actions">
-            <button class="btn ghost" id="btn-ms-disconnect-card" type="button">Disconnect</button>
-          </div>
-        </div>
-      </div>
-      <div id="ms-pending-panel" class="hidden">
-        <div class="gmail-connect-row">
-          <div>
-            <div class="actions-title">Microsoft Email</div>
-            <div class="gmail-connected-row">
-              <span class="gmail-status-badge pending" id="ms-pending-badge">Signed in</span>
-              <span class="gmail-status-email" id="ms-pending-email"></span>
-            </div>
-            <div class="gmail-connect-desc" id="ms-pending-detail"></div>
-          </div>
-          <div class="gmail-connect-actions">
-            <button class="btn ghost" id="btn-ms-refresh" type="button">Refresh status</button>
-            <button class="btn ghost" id="btn-ms-disconnect-pending" type="button">Disconnect</button>
-          </div>
-        </div>
-      </div>
-    </section>
 
     <section class="card notif-panel hidden" id="notif-panel">
       <div class="leads-head">
@@ -189,104 +89,29 @@
       <div id="notif-list" class="notif-list"></div>
     </section>
 
-    <section class="icp-strip" id="icp-strip"></section>
-
-    <section class="stats-row" id="stats-row"></section>
-
-    <section class="card funnel-card">
-      <div class="funnel-head">
-        <div class="actions-title">Pipeline</div>
-        <div class="funnel-legend" id="funnel-legend"></div>
-      </div>
-      <div class="funnel-bar" id="funnel-bar"></div>
-    </section>
-
-    <section class="card actions-card">
-      <div class="actions-row">
+    <section class="card overview-card" id="overview-card">
+      <div class="overview-grid">
         <div>
-          <div class="actions-title">Agent actions</div>
-          <div class="automation-desc">
-            Run tasks for the selected agent. Re-qualify applies your latest ICP rules and prompts to existing leads.
-          </div>
+          <div class="overview-label">Today</div>
+          <div class="today-stats" id="today-stats"></div>
         </div>
-        <div class="actions-buttons">
-          <button class="btn primary" id="btn-requalify" type="button">Re-qualify all</button>
-          <button class="btn" id="btn-discover" type="button">Discover</button>
-          <button class="btn" id="btn-process" type="button">Process imported</button>
-          <button class="btn" id="btn-contacts" type="button">Contact search</button>
-        </div>
-      </div>
-      <div class="job-panel hidden" id="job-panel">
-        <div class="job-head">
-          <span class="job-title" id="job-title">Running…</span>
-          <div class="job-head-actions">
-            <span class="job-status" id="job-status"></span>
-            <button class="btn ghost small hidden" id="btn-cancel-job" type="button">Cancel</button>
-          </div>
-        </div>
-        <pre class="job-log" id="job-log"></pre>
-      </div>
-    </section>
-
-    <section class="card automation-card">
-      <div class="automation-row">
         <div>
-          <div class="actions-title">Automation</div>
-          <div class="automation-desc" id="automation-desc">
-            Agents run automatically every night — discovering prospects, qualifying leads,
-            drafting outreach, and scanning Gmail for replies.
-          </div>
-          <div class="automation-meta" id="automation-meta"></div>
-        </div>
-        <div class="automation-actions">
-          <button class="btn" id="btn-scan-replies">Scan replies now</button>
+          <div class="overview-label">Pipeline</div>
+          <div class="funnel-bar" id="funnel-bar"></div>
+          <div class="funnel-legend" id="funnel-legend"></div>
         </div>
       </div>
+      <div class="stats-row" id="stats-row"></div>
     </section>
 
-    <section class="card prompts-card">
-      <div class="prompts-head">
-        <div>
-          <div class="actions-title">Agent prompts</div>
-          <div class="prompts-desc" id="prompts-summary">Customize the AI instructions used for qualification and outreach.</div>
-        </div>
-        <div class="prompts-actions">
-          <button class="btn ghost small" id="prompts-toggle" type="button" aria-expanded="false">Advanced settings</button>
-        </div>
-      </div>
-      <div class="prompts-body hidden" id="prompts-body">
-        <div class="prompts-toolbar">
-          <span class="prompts-path-hint">Saved to <code id="prompts-path">agents/…/prompts.yaml</code></span>
-          <div class="prompts-toolbar-actions">
-            <button class="btn ghost small" id="prompts-reset" type="button">Reset defaults</button>
-            <button class="btn small" id="prompts-save" type="button">Save prompts</button>
-          </div>
-        </div>
-      <div class="prompts-tabs">
-        <button class="prompts-tab active" type="button" data-tab="qualify">Qualification</button>
-        <button class="prompts-tab" type="button" data-tab="outreach">Outreach</button>
-      </div>
-      <div class="prompts-panel active" id="prompts-panel-qualify">
-        <label class="prompt-label" for="prompt-qualify-system">Qualification system prompt <span class="prompt-hint">(LLM role — editable)</span></label>
-        <textarea id="prompt-qualify-system" class="prompt-input" rows="3" spellcheck="false"></textarea>
-        <label class="prompt-label" for="prompt-qualify-extra">Extra instructions <span class="prompt-hint">(inserted into the user prompt per lead)</span></label>
-        <textarea id="prompt-qualify-extra" class="prompt-input" rows="4" spellcheck="false" placeholder="e.g. Prioritize companies with active data-sharing programs."></textarea>
-        <div class="prompt-label">User prompt template <span class="prompt-hint">(read-only — ICP + prospect filled at runtime)</span></div>
-        <pre id="prompt-qualify-template" class="prompt-template"></pre>
-      </div>
-      <div class="prompts-panel" id="prompts-panel-outreach">
-        <label class="prompt-label" for="prompt-outreach-system">Outreach system prompt <span class="prompt-hint">(LLM role — editable)</span></label>
-        <textarea id="prompt-outreach-system" class="prompt-input" rows="3" spellcheck="false"></textarea>
-        <label class="prompt-label" for="prompt-outreach-extra">Extra instructions <span class="prompt-hint">(inserted into the user prompt per lead)</span></label>
-        <textarea id="prompt-outreach-extra" class="prompt-input" rows="4" spellcheck="false" placeholder="e.g. Mention our free risk assessment pilot when score is hot."></textarea>
-        <div class="prompt-label">User prompt template <span class="prompt-hint">(read-only — contact + research filled at runtime)</span></div>
-        <pre id="prompt-outreach-template" class="prompt-template"></pre>
-      </div>
-      <div class="prompts-status hidden" id="prompts-status"></div>
-      </div>
-    </section>
+    <nav class="view-tabs" id="view-tabs">
+      <button class="view-tab active" type="button" data-view="leads">Leads</button>
+      <button class="view-tab" type="button" data-view="review">Review</button>
+      <button class="view-tab" type="button" data-view="run">Run</button>
+      <button class="view-tab" type="button" data-view="settings">Settings</button>
+    </nav>
 
-    <section class="card leads">
+    <section class="card leads view-panel" id="leads-panel">
       <div class="leads-head">
         <div class="leads-title">Leads <span id="leads-count" class="count-badge">0</span></div>
         <div class="leads-filters">
@@ -299,6 +124,7 @@
             <option value="drafted">Drafted</option>
             <option value="emailed">Emailed</option>
             <option value="replied">Replied</option>
+            <option value="awaiting_contact">Awaiting contact</option>
             <option value="skipped">Skipped</option>
           </select>
         </div>
@@ -313,8 +139,215 @@
           </thead>
           <tbody id="leads-body"></tbody>
         </table>
-        <div class="empty hidden" id="leads-empty">No leads yet — agents will populate this on the next nightly run.</div>
+        <div class="empty hidden" id="leads-empty">No leads yet — run the pipeline from the Run tab.</div>
         <div class="empty hidden" id="leads-filter-empty">No leads match your search or filter.</div>
+      </div>
+    </section>
+
+    <section class="card view-panel hidden" id="review-panel">
+      <div class="leads-head">
+        <div class="leads-title">Review</div>
+        <button class="btn primary small" id="btn-review-mode" type="button">Review queue (J/K)</button>
+      </div>
+      <p class="section-desc">Accept drafts into few-shot memory, or reject to skip the lead.</p>
+      <div class="funnel-head" style="margin-top:8px">
+        <div class="actions-title" style="margin:0">QA queue</div>
+        <button class="btn ghost small" id="btn-qa-refresh" type="button">Refresh</button>
+      </div>
+      <div id="qa-list" class="qa-list"></div>
+    </section>
+
+    <section class="card view-panel hidden" id="run-panel">
+      <div class="actions-row">
+        <div>
+          <div class="actions-title">Run pipeline</div>
+          <p class="section-desc">Primary run for this agent. Secondary tools are for catch-up work.</p>
+        </div>
+        <div class="actions-buttons">
+          <button class="btn primary" id="btn-contacts" type="button">Run pipeline</button>
+          <button class="btn ghost" id="btn-scan-replies" type="button">Scan replies</button>
+        </div>
+      </div>
+      <div class="secondary-actions">
+        <button class="btn ghost small" id="btn-discover" type="button">Discover only</button>
+        <button class="btn ghost small" id="btn-process" type="button">Process imported</button>
+        <button class="btn ghost small" id="btn-requalify" type="button">Re-qualify all</button>
+      </div>
+      <div class="job-panel hidden" id="job-panel">
+        <div class="job-head">
+          <span class="job-title" id="job-title">Running…</span>
+          <div class="job-head-actions">
+            <span class="job-status" id="job-status"></span>
+            <button class="btn ghost small hidden" id="btn-cancel-job" type="button">Cancel</button>
+          </div>
+        </div>
+        <pre class="job-log" id="job-log"></pre>
+      </div>
+      <div class="automation-meta-block">
+        <div class="overview-label">Nightly automation</div>
+        <div class="automation-desc" id="automation-desc">
+          Agents run automatically every night — discovering prospects, qualifying leads,
+          drafting outreach, and scanning mail for replies.
+        </div>
+        <div class="automation-meta" id="automation-meta"></div>
+      </div>
+    </section>
+
+    <section class="card view-panel hidden" id="settings-panel">
+      <div class="settings-stack">
+        <div class="settings-block">
+          <div class="actions-title">Anthropic system prompts</div>
+          <p class="section-desc" id="prompts-summary">Edit Claude system prompts for this agent. Saved prompts apply on the next run.</p>
+          <button class="btn ghost small" id="prompts-toggle" type="button" aria-expanded="false">Edit prompts</button>
+          <div class="prompts-body hidden" id="prompts-body">
+            <div class="prompts-toolbar">
+              <span class="prompts-path-hint">Saved to <code id="prompts-path">agents/…/prompts.yaml</code></span>
+              <div class="prompts-toolbar-actions">
+                <button class="btn ghost small" id="prompts-reset" type="button">Reset defaults</button>
+                <button class="btn small" id="prompts-save" type="button">Save prompts</button>
+              </div>
+            </div>
+            <div class="prompts-tabs">
+              <button class="prompts-tab active" type="button" data-tab="qualify">Qualification</button>
+              <button class="prompts-tab" type="button" data-tab="outreach">Outreach</button>
+              <button class="prompts-tab keira-only hidden" type="button" data-tab="analyst">Analyst</button>
+              <button class="prompts-tab keira-only hidden" type="button" data-tab="critic">Critic</button>
+            </div>
+            <div class="prompts-panel active" id="prompts-panel-qualify">
+              <label class="prompt-label" for="prompt-qualify-system">Qualification system prompt</label>
+              <textarea id="prompt-qualify-system" class="prompt-input" rows="5" spellcheck="false"></textarea>
+              <label class="prompt-label" for="prompt-qualify-extra">Extra instructions</label>
+              <textarea id="prompt-qualify-extra" class="prompt-input" rows="4" spellcheck="false" placeholder="e.g. Prioritize companies with active data-sharing programs."></textarea>
+              <div class="prompt-label">User prompt template <span class="prompt-hint">(read-only)</span></div>
+              <pre id="prompt-qualify-template" class="prompt-template"></pre>
+            </div>
+            <div class="prompts-panel" id="prompts-panel-outreach">
+              <label class="prompt-label" for="prompt-outreach-system">Outreach system prompt</label>
+              <textarea id="prompt-outreach-system" class="prompt-input" rows="5" spellcheck="false"></textarea>
+              <label class="prompt-label" for="prompt-outreach-extra">Extra instructions</label>
+              <textarea id="prompt-outreach-extra" class="prompt-input" rows="4" spellcheck="false" placeholder="e.g. Mention our free risk assessment pilot when score is hot."></textarea>
+              <div class="prompt-label">User prompt template <span class="prompt-hint">(read-only)</span></div>
+              <pre id="prompt-outreach-template" class="prompt-template"></pre>
+            </div>
+            <div class="prompts-panel keira-only hidden" id="prompts-panel-analyst">
+              <label class="prompt-label" for="prompt-analyst-system">Succession analyst system prompt</label>
+              <textarea id="prompt-analyst-system" class="prompt-input" rows="8" spellcheck="false"></textarea>
+            </div>
+            <div class="prompts-panel keira-only hidden" id="prompts-panel-critic">
+              <label class="prompt-label" for="prompt-critic-system">Critic gate system prompt</label>
+              <textarea id="prompt-critic-system" class="prompt-input" rows="8" spellcheck="false"></textarea>
+            </div>
+            <div class="prompts-status hidden" id="prompts-status"></div>
+          </div>
+        </div>
+
+        <div class="settings-block">
+          <div class="actions-title">Signals</div>
+          <div id="signals-list"></div>
+        </div>
+
+        <div class="settings-block">
+          <div class="actions-title">Compliance</div>
+          <div class="compliance-actions">
+            <a class="btn" href="/api/compliance/privacy-posture" target="_blank" rel="noopener">Privacy Posture</a>
+            <button class="btn ghost" id="btn-load-suppression" type="button">Load suppression list</button>
+          </div>
+          <pre id="suppression-list" class="outreach-pre">—</pre>
+        </div>
+
+        <div class="settings-block" id="gmail-card">
+          <div id="gmail-connect-panel" class="hidden">
+            <div class="gmail-connect-row">
+              <div>
+                <div class="actions-title">Gmail</div>
+                <div class="gmail-connect-desc" id="gmail-connect-desc">
+                  Connect Gmail to create drafts, send outreach, and scan for replies.
+                </div>
+                <div class="gmail-connect-meta" id="gmail-connect-meta"></div>
+              </div>
+              <div class="gmail-connect-actions">
+                <a class="btn" id="btn-gmail-connect" href="/api/gmail/oauth/start">Connect Gmail</a>
+              </div>
+            </div>
+          </div>
+          <div id="gmail-connected-panel" class="hidden">
+            <div class="gmail-connect-row">
+              <div>
+                <div class="actions-title">Gmail</div>
+                <div class="gmail-connected-row">
+                  <span class="gmail-status-badge">Connected</span>
+                  <span class="gmail-status-email" id="gmail-card-email"></span>
+                </div>
+              </div>
+              <div class="gmail-connect-actions">
+                <button class="btn ghost" id="btn-gmail-disconnect-card" type="button">Disconnect</button>
+              </div>
+            </div>
+          </div>
+          <div id="gmail-pending-panel" class="hidden">
+            <div class="gmail-connect-row">
+              <div>
+                <div class="actions-title">Gmail</div>
+                <div class="gmail-connected-row">
+                  <span class="gmail-status-badge pending" id="gmail-pending-badge">Signed in</span>
+                  <span class="gmail-status-email" id="gmail-pending-email"></span>
+                </div>
+                <div class="gmail-connect-desc" id="gmail-pending-detail"></div>
+              </div>
+              <div class="gmail-connect-actions">
+                <button class="btn ghost" id="btn-gmail-refresh" type="button">Refresh status</button>
+                <button class="btn ghost" id="btn-gmail-disconnect-pending" type="button">Disconnect</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-block" id="ms-card">
+          <div id="ms-connect-panel" class="hidden">
+            <div class="gmail-connect-row">
+              <div>
+                <div class="actions-title">Microsoft Email</div>
+                <div class="gmail-connect-desc" id="ms-connect-desc">
+                  Connect Microsoft 365 / Outlook for drafts, send, and reply scan.
+                </div>
+                <div class="gmail-connect-meta" id="ms-connect-meta"></div>
+              </div>
+              <div class="gmail-connect-actions">
+                <a class="btn" id="btn-ms-connect" href="/api/microsoft/oauth/start">Connect Microsoft Email</a>
+              </div>
+            </div>
+          </div>
+          <div id="ms-connected-panel" class="hidden">
+            <div class="gmail-connect-row">
+              <div>
+                <div class="actions-title">Microsoft Email</div>
+                <div class="gmail-connected-row">
+                  <span class="gmail-status-badge">Connected</span>
+                  <span class="gmail-status-email" id="ms-card-email"></span>
+                </div>
+              </div>
+              <div class="gmail-connect-actions">
+                <button class="btn ghost" id="btn-ms-disconnect-card" type="button">Disconnect</button>
+              </div>
+            </div>
+          </div>
+          <div id="ms-pending-panel" class="hidden">
+            <div class="gmail-connect-row">
+              <div>
+                <div class="actions-title">Microsoft Email</div>
+                <div class="gmail-connected-row">
+                  <span class="gmail-status-badge pending" id="ms-pending-badge">Signed in</span>
+                  <span class="gmail-status-email" id="ms-pending-email"></span>
+                </div>
+                <div class="gmail-connect-desc" id="ms-pending-detail"></div>
+              </div>
+              <div class="gmail-connect-actions">
+                <button class="btn ghost" id="btn-ms-refresh" type="button">Refresh status</button>
+                <button class="btn ghost" id="btn-ms-disconnect-pending" type="button">Disconnect</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   </main>
@@ -339,6 +372,14 @@
         <div class="modal-label">Signal</div>
         <div id="m-signal" class="modal-text">—</div>
       </div>
+      <div class="modal-section hidden" id="m-evidence-wrap">
+        <div class="modal-label">Evidence — why is this here?</div>
+        <ul id="m-evidence" class="modal-list"></ul>
+      </div>
+      <div class="modal-section hidden" id="m-sequence-wrap">
+        <div class="modal-label">4-touch sequence</div>
+        <div id="m-sequence"></div>
+      </div>
       <div class="modal-section hidden" id="m-qual-wrap">
         <div class="modal-label">Why this score</div>
         <ul id="m-reasons" class="modal-list"></ul>
@@ -354,6 +395,13 @@
           <button class="btn ghost small" id="m-copy" type="button">Copy</button>
         </div>
         <pre id="m-outreach" class="outreach-pre">—</pre>
+        <div class="modal-section hidden" id="m-linkedin-note-wrap">
+          <div class="modal-label-row">
+            <div class="modal-label">LinkedIn connection note</div>
+            <button class="btn ghost small" id="m-linkedin-copy" type="button">Copy note</button>
+          </div>
+          <pre id="m-linkedin-note" class="outreach-pre">—</pre>
+        </div>
         <div class="outreach-gmail-bar" id="m-gmail-bar">
           <button class="btn primary" id="m-gmail-import" type="button">Import to Gmail</button>
           <button class="btn primary hidden" id="m-ms-import" type="button">Import to Outlook</button>
@@ -366,11 +414,17 @@
       <div class="modal-section">
         <div class="modal-label">Update status</div>
         <div class="status-buttons" id="m-status-buttons"></div>
+        <div class="review-actions hidden" id="m-review-actions">
+          <button class="btn primary small" id="m-approve" type="button">Approve (A)</button>
+          <button class="btn ghost small" id="m-reject" type="button">Reject (X)</button>
+          <button class="btn ghost small" id="m-regen" type="button">Regenerate (R)</button>
+          <button class="btn ghost small hidden" id="m-actava-dive" type="button">Actava deep dive</button>
+        </div>
       </div>
     </div>
   </div>
 </div>
 
-<script src="app.js?v=16"></script>
+<script src="app.js?v=19"></script>
 </body>
 </html>

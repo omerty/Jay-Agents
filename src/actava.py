@@ -41,7 +41,8 @@ def _agent_config(agent: str) -> dict:
         return yaml.safe_load(f)
 
 
-def _keira_prospect_prompt(config: dict, *, limit: int) -> str:
+def _prospect_prompt(config: dict, *, limit: int) -> str:
+    """Build Actava agent prompt from agent config (Keira owners, Woodway companies, etc.)."""
     actava_cfg = config.get("actava") or {}
     custom = (actava_cfg.get("prospect_prompt") or "").strip()
     if custom:
@@ -50,10 +51,43 @@ def _keira_prospect_prompt(config: dict, *, limit: int) -> str:
     icp = config.get("icp") or {}
     prompts = config.get("prompts") or {}
     qualify_extra = (prompts.get("qualify_extra") or "").strip()
-    geo = _geo_text(icp) or "Ottawa, Eastern Ontario, Kingston, Cornwall"
-
+    geo = _geo_text(icp) or "target geography"
+    mode = (actava_cfg.get("mode") or "people").strip().lower()
     extra = f"\n\nAdditional scoring guidance:\n{qualify_extra}" if qualify_extra else ""
 
+    if mode in ("companies", "company"):
+        return f"""You are sourcing target COMPANIES for {config['company']} ({config['product']}).
+
+Find up to {limit} companies that fit this ICP:
+- Industries: {_industries_text(icp)}
+- Company size: {_size_text(icp)}
+- Geography: {geo}
+- Why they care: {config.get('tagline') or config['product']}
+{extra}
+
+Focus on company identity and fit — names, what they do, and why they may need
+privacy / data-governance / re-identification risk tooling. Contact people are optional
+(another system will find them later).
+
+Skip: tiny startups under ~50 employees, companies with no data-sharing footprint.{extra}
+
+Return ONLY valid JSON (no markdown):
+{{
+  "leads": [
+    {{
+      "company": "Company Name",
+      "contact_name": null,
+      "contact_title": null,
+      "industry": "industry",
+      "employee_count": null,
+      "linkedin_url": null,
+      "description": "1-2 sentence company description",
+      "signal": "why this company fits the ICP — cite evidence"
+    }}
+  ]
+}}"""
+
+    # Default: people/owner style (Keira and similar)
     return f"""You are sourcing M&A advisory prospects for {config['company']} ({config['product']}).
 
 Find up to {limit} privately held businesses in {geo} where the OWNER or FOUNDER may be a
@@ -61,6 +95,10 @@ succession/exit candidate. Target valuation $10–100M (roughly 20–500 employe
 
 Focus industries: manufacturing, construction, industrial distribution, logistics, HVAC,
 commercial services, B2B — sector-agnostic is fine if size/geography fit.
+
+PRIORITIZE strong exit evidence (tier 2+): succession planning, retirement, next chapter,
+leadership transition, second/third generation taking over, founder stepping back.
+Do NOT return thin "family-owned" only leads without concrete succession evidence.
 
 Skip: M&A brokers, accounting/law firms, PE firms, marketplaces, government, nonprofits.{extra}
 
@@ -74,10 +112,43 @@ Return ONLY valid JSON (no markdown):
       "industry": "industry",
       "employee_count": null,
       "linkedin_url": null,
+      "succession_signals": ["concrete evidence 1", "concrete evidence 2"],
+      "why_now": "1 sentence on timing",
       "signal": "why they may be an exit candidate — cite specific evidence"
     }}
   ]
 }}"""
+
+
+def _keira_prospect_prompt(config: dict, *, limit: int) -> str:
+    """Back-compat alias."""
+    return _prospect_prompt(config, limit=limit)
+
+
+def _salvage_truncated_leads(text: str) -> list[dict]:
+    """Recover complete lead objects from truncated Actava/Anthropic JSON."""
+    out: list[dict] = []
+    for m in re.finditer(r'\{\s*"company"\s*:', text):
+        chunk = text[m.start() :]
+        depth = 0
+        end = None
+        for i, ch in enumerate(chunk):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        if not end:
+            continue
+        try:
+            obj = json.loads(chunk[:end])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and (obj.get("company") or "").strip():
+            out.append(obj)
+    return out
 
 
 def _parse_leads_json(text: str) -> list[dict]:
@@ -112,12 +183,18 @@ def _parse_leads_json(text: str) -> list[dict]:
                     end = i + 1
                     break
         if not end:
+            salvaged = _salvage_truncated_leads(chunk)
+            if salvaged:
+                return salvaged
             continue
         raw = chunk[:end]
         cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", raw)
         try:
             return _coerce(json.loads(cleaned))
         except json.JSONDecodeError:
+            salvaged = _salvage_truncated_leads(cleaned)
+            if salvaged:
+                return salvaged
             continue
 
     match = re.search(r"\{.*\}", text, re.DOTALL)
@@ -127,7 +204,30 @@ def _parse_leads_json(text: str) -> list[dict]:
     try:
         return _coerce(json.loads(cleaned))
     except json.JSONDecodeError:
-        return []
+        return _salvage_truncated_leads(cleaned)
+
+
+def _enrich_signal_from_actava(raw: dict) -> str:
+    """Fold Actava succession / why_now fields into the signal blob for gates."""
+    parts: list[str] = []
+    base = (raw.get("signal") or raw.get("reason") or "").strip()
+    if base:
+        parts.append(base)
+    desc = (raw.get("description") or "").strip()
+    if desc and desc.lower() not in (base or "").lower():
+        parts.append(desc)
+    why = (raw.get("why_now") or "").strip()
+    if why and why.lower() not in " ".join(parts).lower():
+        parts.append(why)
+    sigs = raw.get("succession_signals") or raw.get("signals") or []
+    if isinstance(sigs, list):
+        for s in sigs[:6]:
+            text = s if isinstance(s, str) else (s.get("evidence") or s.get("type") or "")
+            text = str(text).strip()
+            if text and text.lower() not in " ".join(parts).lower():
+                parts.append(text)
+    blob = " · ".join(parts).strip() or "Actava prospect match"
+    return blob[:1200]
 
 
 def _lead_record(raw: dict, config: dict) -> dict | None:
@@ -147,7 +247,12 @@ def _lead_record(raw: dict, config: dict) -> dict | None:
         except (TypeError, ValueError):
             emp = None
 
-    signal = (raw.get("signal") or raw.get("reason") or "Actava prospect match").strip()
+    signal = _enrich_signal_from_actava(raw)
+    score = raw.get("total_score") or raw.get("score")
+    try:
+        score = int(score) if score is not None else None
+    except (TypeError, ValueError):
+        score = None
 
     return {
         "company": company,
@@ -160,6 +265,7 @@ def _lead_record(raw: dict, config: dict) -> dict | None:
         "signal": f"Actava — {signal}",
         "source": "actava",
         "status": "imported",
+        "score": score,
     }
 
 
@@ -206,12 +312,51 @@ def _import_leads(raw_leads: list[dict], agent: str, config: dict, *, skip_exist
     }
 
 
-def _search_via_agent(agent: str, config: dict, *, limit: int, emit) -> list[dict]:
-    agent_id = os.getenv("ACTAVA_AGENT_ID", "").strip()
+def _actava_agent_id_for(agent: str) -> str:
+    """Resolve Actava external agent id for a JayAgents agent.
+
+    Prefer ACTAVA_AGENT_ID_<AGENT>, then config actava.agent_id, then shared
+    ACTAVA_AGENT_ID.
+
+    Keira: shared Woodway/EviData agents still work when given Keira's ICP prompt
+    (verified). Default ON via config actava.use_shared_agent or
+    KEIRA_USE_SHARED_ACTAVA_AGENT (default true).
+    """
+    specific = os.getenv(f"ACTAVA_AGENT_ID_{agent.upper()}", "").strip()
+    if specific:
+        return specific
+    try:
+        actava_cfg = _agent_config(agent).get("actava") or {}
+        cfg_id = str((actava_cfg.get("agent_id") or "")).strip()
+    except Exception:
+        actava_cfg = {}
+        cfg_id = ""
+    if cfg_id:
+        return cfg_id
+    shared = os.getenv("ACTAVA_AGENT_ID", "").strip()
+    if not shared:
+        return ""
+    if agent == "keira":
+        env = os.getenv("KEIRA_USE_SHARED_ACTAVA_AGENT", "").strip().lower()
+        if env in ("0", "false", "no"):
+            return ""
+        if env in ("1", "true", "yes"):
+            return shared
+        use_shared = actava_cfg.get("use_shared_agent", True)
+        if isinstance(use_shared, str):
+            use_shared = use_shared.lower() not in ("0", "false", "no")
+        return shared if use_shared else ""
+    return shared
+
+
+def _search_via_agent(
+    agent: str, config: dict, *, limit: int, emit, agent_id: str | None = None,
+) -> list[dict]:
+    agent_id = (agent_id or _actava_agent_id_for(agent)).strip()
     if not agent_id:
         raise ActavaError("ACTAVA_AGENT_ID not set")
 
-    prompt = _keira_prospect_prompt(config, limit=limit)
+    prompt = _prospect_prompt(config, limit=limit)
     emit(f"Running Actava agent {agent_id[:8]}…")
     result = run_agent_and_wait(agent_id, prompt, on_progress=emit)
     text = extract_response_text(result)
@@ -244,14 +389,17 @@ def _search_via_discover_cura(agent: str, config: dict, *, limit: int, emit) -> 
             f"{i}. [{h['query']}]\n   Title: {h['title']}\n   Snippet: {h['snippet'][:280]}"
         )
 
-    prompt = f"""Extract owner-operated business prospects for {config['company']} — {config['product']}.
+    mode = (actava_cfg.get("mode") or "people").strip().lower()
+    company_mode = mode in ("companies", "company")
+
+    prompt = f"""Extract {"target companies" if company_mode else "prospects"} for {config['company']} — {config['product']}.
 Tagline: {config['tagline']}
 
 IDEAL CUSTOMER PROFILE:
 - Industries: {_industries_text(icp)}
 - Target titles: {', '.join(icp.get('titles', []))}
 - Company size: {_size_text(icp)}
-- Geography: {_geo_text(icp) or 'Ottawa / Eastern Ontario'}
+- Geography: {_geo_text(icp) or 'global'}
 - Blocklist: {', '.join(config.get('blocklist') or [])}
 {extra_block}
 SEARCH RESULTS:
@@ -259,9 +407,9 @@ SEARCH RESULTS:
 
 Rules:
 - Only companies mentioned in the results — do NOT invent names
-- Prefer owner/founder/succession/retirement signals
+- {"Prefer company fit signals (privacy, data governance, anonymized data, large enterprise)" if company_mode else "Prefer owner/founder/succession/retirement signals"}
 - Return at most {limit} leads
-- Include contact_name/title when visible in snippets
+- {"Include a short description for each company" if company_mode else "Include contact_name/title when visible in snippets"}
 
 JSON only:
 {{
@@ -269,8 +417,9 @@ JSON only:
     {{
       "company": "...",
       "contact_name": null,
-      "contact_title": "Owner",
+      "contact_title": {"null" if company_mode else '"Owner"'},
       "industry": "...",
+      "description": "...",
       "signal": "...",
       "employee_count": null,
       "linkedin_url": null
@@ -280,8 +429,22 @@ JSON only:
 
     system = prompts.get("qualify_system") or "Extract B2B prospects. Output strict JSON only."
     emit("Extracting prospects with Actava Cura…")
-    result = cura_chat_json(prompt, system=system)
-    return result.get("leads") or []
+    try:
+        result = cura_chat_json(prompt, system=system)
+        return result.get("leads") or []
+    except Exception as e:
+        logger.warning("Actava Cura extraction failed (%s) — falling back to Anthropic", e)
+        emit(f"Cura unavailable ({e}); stacking Anthropic extraction…")
+        from .llm import chat_json
+
+        result = chat_json(
+            prompt,
+            system=system,
+            temperature=0.2,
+        )
+        if isinstance(result, list):
+            return result
+        return (result or {}).get("leads") or []
 
 
 def search_and_import_actava(
@@ -291,7 +454,7 @@ def search_and_import_actava(
     skip_existing: bool = True,
     on_progress=None,
 ) -> dict:
-    """Import Keira prospects via Actava (agent run or discover+Cura)."""
+    """Import prospects via Actava (agent run or discover+Cura/Anthropic). Works for any agent config."""
     if not actava_available():
         raise ActavaError("ACTAVA_API_KEY not set — add your key from app.actava.ai to .env")
 
@@ -299,12 +462,20 @@ def search_and_import_actava(
     config = _agent_config(agent)
     init_db()
 
-    if actava_agent_configured():
-        raw_leads = _search_via_agent(agent, config, limit=limit, emit=emit)
+    agent_id = _actava_agent_id_for(agent)
+    if agent_id:
+        raw_leads = _search_via_agent(
+            agent, config, limit=limit, emit=emit, agent_id=agent_id,
+        )
         mode = "agent"
     else:
         raw_leads = _search_via_discover_cura(agent, config, limit=limit, emit=emit)
-        mode = "discover+cura"
+        mode = "discover+cura_or_anthropic"
+        if agent == "keira" and os.getenv("ACTAVA_AGENT_ID", "").strip():
+            emit(
+                "Keira Actava — no agent id resolved; using discover path. "
+                "Set ACTAVA_AGENT_ID_KEIRA or enable actava.use_shared_agent"
+            )
 
     counts = _import_leads(raw_leads, agent, config, skip_existing=skip_existing)
     emit(
@@ -316,6 +487,21 @@ def search_and_import_actava(
         "provider": "actava",
         "mode": mode,
         "searched": len(raw_leads),
+        "companies": [
+            {
+                "company": (r.get("company") or "").strip(),
+                "description": (r.get("description") or r.get("signal") or "").strip(),
+                "industry": (r.get("industry") or "").strip() or None,
+                "signal": _enrich_signal_from_actava(r),
+                "contact_name": (r.get("contact_name") or "").strip() or None,
+                "contact_title": (r.get("contact_title") or "").strip() or None,
+                "employee_count": r.get("employee_count"),
+                "source": "actava",
+                "score": r.get("total_score") or r.get("score"),
+            }
+            for r in raw_leads
+            if (r.get("company") or "").strip()
+        ],
         "credits_used": 0,
         **counts,
         "errors": [],
@@ -325,3 +511,24 @@ def search_and_import_actava(
 # re-export for web health
 def actava_status_export() -> dict:
     return actava_status()
+
+
+def run_actava_for_company(company: str, *, agent: str = "woodway") -> dict:
+    """Deep-dive Actava report for one qualified account."""
+    from .actava_api import ActavaError, run_agent_and_wait, extract_response_text
+
+    config = _agent_config(agent)
+    agent_id = _actava_agent_id_for(agent) or os.getenv("ACTAVA_AGENT_ID", "").strip()
+    if not agent_id:
+        raise ActavaError("ACTAVA_AGENT_ID not set")
+    prompt = (
+        f"Produce a concise sales intelligence report on {company} for {config['company']} ({config['product']}). "
+        f"Include: data governance maturity, anonymized data / sharing initiatives, key privacy leaders, "
+        f"recent triggers (hires, partnerships, regulatory), and recommended outreach angle."
+    )
+    result = run_agent_and_wait(agent_id, prompt)
+    return {
+        "company": company,
+        "report": extract_response_text(result),
+        "mode": "actava_deep_dive",
+    }

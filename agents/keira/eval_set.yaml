@@ -1,0 +1,308 @@
+# Keira M&A qualification holdout set.
+# Labels: geo_correct, owner_correct, private_company, size_correct, succession_signal, overall_fit
+# expect: qualify | research_required | reject
+# Run: python -m src.keira_eval
+
+cases:
+  # --- POSITIVE / QUALIFY ---
+  - id: pos_ottawa_founder_succession
+    expect: qualify
+    labels: {geo_correct: true, owner_correct: true, private_company: true, size_correct: true, succession_signal: true, overall_fit: true}
+    lead:
+      company: Rideau Precision Manufacturing Inc.
+      contact_name: Margaret Chen
+      contact_title: Founder & President
+      company_city: Ottawa
+      employee_count: 85
+      industry: Industrial Manufacturing
+      signal: Founded in 1987. Daughter joined as VP Operations in 2021. Succession planning and next chapter language on leadership page.
+
+  - id: pos_kingston_owner_retirement
+    expect: qualify
+    labels: {geo_correct: true, owner_correct: true, private_company: true, size_correct: true, succession_signal: true, overall_fit: true}
+    lead:
+      company: Limestone Logistics Ltd
+      contact_name: David Barr
+      contact_title: Owner
+      company_city: Kingston
+      employee_count: 120
+      signal: Owner planning retirement after 40 years. Succession planning underway.
+
+  - id: pos_cornwall_president_transition
+    expect: qualify
+    labels: {geo_correct: true, owner_correct: true, private_company: true, size_correct: true, succession_signal: true, overall_fit: true}
+    lead:
+      company: Seaway Distributors Inc.
+      contact_name: Helen Roy
+      contact_title: President
+      company_city: Cornwall
+      employee_count: 55
+      signal: Founded in 1991. New president appointed; transitioning leadership to next generation.
+
+  - id: pos_kanata_ceo_next_chapter
+    expect: qualify
+    labels: {geo_correct: true, owner_correct: true, private_company: true, size_correct: true, succession_signal: true, overall_fit: true}
+    lead:
+      company: TechFab Systems
+      contact_name: Omar Haddad
+      contact_title: CEO & Founder
+      company_city: Kanata
+      employee_count: 95
+      signal: Founder stepping back after 35 years. Exploring strategic options and next chapter.
+
+  - id: pos_belleville_family_executive
+    expect: qualify
+    labels: {geo_correct: true, owner_correct: true, private_company: true, size_correct: true, succession_signal: true, overall_fit: true}
+    lead:
+      company: Quinte Industrial Supply
+      contact_name: Robert Quinn
+      contact_title: Founder & President
+      company_city: Belleville
+      employee_count: 70
+      signal: Son now serves as VP Operations. Succession planning discussed in 2025 industry article.
+
+  - id: pos_pembroke_ownership_transition
+    expect: qualify
+    labels: {geo_correct: true, owner_correct: true, private_company: true, size_correct: true, succession_signal: true, overall_fit: true}
+    lead:
+      company: Ottawa Valley Fabrication
+      contact_name: Susan Blake
+      contact_title: Owner / Operator
+      company_city: Pembroke
+      employee_count: 45
+      signal: Ownership transition announced; family succession being evaluated.
+
+  # --- RESEARCH REQUIRED (fit but weak timing) ---
+  - id: research_ottawa_family_only
+    expect: research_required
+    labels: {geo_correct: true, owner_correct: true, private_company: true, size_correct: true, succession_signal: false, overall_fit: false}
+    lead:
+      company: Capital Family Foods
+      contact_name: Pat Lee
+      contact_title: Owner
+      company_city: Ottawa
+      employee_count: 40
+      signal: Family-owned business since 1995. Privately held manufacturer.
+
+  - id: research_kingston_founder_no_exit
+    expect: research_required
+    labels: {geo_correct: true, owner_correct: true, private_company: true, size_correct: true, succession_signal: false, overall_fit: false}
+    lead:
+      company: Cataraqui Components
+      contact_name: James Wong
+      contact_title: Founder
+      company_city: Kingston
+      employee_count: 30
+      signal: Founder-led private company. Growing steadily.
+
+  - id: research_missing_owner_title
+    expect: research_required
+    labels: {geo_correct: true, owner_correct: false, private_company: true, size_correct: true, succession_signal: true, overall_fit: false}
+    lead:
+      company: Eastern Ontario Metals
+      company_city: Ottawa
+      employee_count: 80
+      signal: Succession planning underway at long-standing manufacturer founded in 1982.
+
+  # --- GEO REJECTS ---
+  - id: neg_toronto_hq
+    expect: reject
+    labels: {geo_correct: false, owner_correct: true, private_company: true, size_correct: true, succession_signal: true, overall_fit: false}
+    lead:
+      company: GTA Precision Parts
+      contact_name: Amy Tran
+      contact_title: Founder & President
+      company_city: Toronto
+      employee_count: 90
+      signal: Succession planning underway. Founded in 1985.
+
+  - id: neg_mississauga
+    expect: reject
+    labels: {geo_correct: false, owner_correct: true, private_company: true, size_correct: true, succession_signal: true, overall_fit: false}
+    lead:
+      company: Peel Manufacturing Co
+      contact_name: Carl Singh
+      contact_title: Owner
+      company_city: Mississauga
+      employee_count: 110
+      signal: Owner retirement and succession planning.
+
+  - id: neg_ontario_only
+    expect: reject
+    labels: {geo_correct: false, owner_correct: true, private_company: true, size_correct: true, succession_signal: true, overall_fit: false}
+    lead:
+      company: Provincial Widgets Inc
+      contact_name: Nora Wells
+      contact_title: President
+      employee_count: 60
+      signal: Based in Ontario. Succession planning underway after 30 years.
+
+  - id: neg_serves_ottawa
+    expect: reject
+    labels: {geo_correct: false, owner_correct: true, private_company: true, size_correct: true, succession_signal: true, overall_fit: false}
+    lead:
+      company: National Fleet Services
+      contact_name: Ian Cross
+      contact_title: Founder & CEO
+      company_city: Toronto
+      employee_count: 200
+      signal: We serve Ottawa market from Toronto HQ. Founder retiring.
+
+  - id: neg_toronto_serves_eastern_ontario
+    expect: reject
+    labels: {geo_correct: false, owner_correct: true, private_company: true, size_correct: true, succession_signal: true, overall_fit: false}
+    lead:
+      company: GTA Industrial Supply
+      contact_name: Priya Nair
+      contact_title: Owner & President
+      company_city: Toronto
+      employee_count: 85
+      signal: Headquartered in Toronto. Serves Eastern Ontario manufacturers. Succession planning underway.
+
+  - id: neg_mississauga_serves_ontario
+    expect: reject
+    labels: {geo_correct: false, owner_correct: true, private_company: true, size_correct: true, succession_signal: true, overall_fit: false}
+    lead:
+      company: Peel Logistics Group
+      contact_name: Omar Haddad
+      contact_title: Founder
+      company_city: Mississauga
+      employee_count: 120
+      signal: Based in Mississauga. Serves Ontario and Eastern Ontario clients. Owner retirement.
+
+  # --- OWNER REJECTS ---
+  - id: neg_vp_sales
+    expect: reject
+    labels: {geo_correct: true, owner_correct: false, private_company: true, size_correct: true, succession_signal: true, overall_fit: false}
+    lead:
+      company: Ottawa Gear Works
+      contact_name: Sam Patel
+      contact_title: VP Sales
+      company_city: Ottawa
+      employee_count: 75
+      signal: Succession planning underway. Founded in 1980.
+
+  - id: neg_regional_president
+    expect: reject
+    labels: {geo_correct: true, owner_correct: false, private_company: true, size_correct: true, succession_signal: false, overall_fit: false}
+    lead:
+      company: BigBox Canada Division
+      contact_name: Lisa Moore
+      contact_title: Regional President
+      company_city: Ottawa
+      employee_count: 300
+      signal: Leadership transition at Canadian division.
+
+  - id: neg_walmart_canada_president
+    expect: reject
+    labels: {geo_correct: true, owner_correct: false, private_company: false, size_correct: false, succession_signal: false, overall_fit: false}
+    lead:
+      company: Walmart Canada
+      contact_name: Chris Allen
+      contact_title: President
+      company_city: Ottawa
+      employee_count: 500
+      signal: Leadership transition announced for Canadian retail division.
+
+  - id: neg_national_president_title
+    expect: reject
+    labels: {geo_correct: true, owner_correct: false, private_company: true, size_correct: true, succession_signal: false, overall_fit: false}
+    lead:
+      company: Northern Facilities Division
+      contact_name: Dana Brooks
+      contact_title: National President
+      company_city: Kingston
+      employee_count: 140
+      signal: National president stepping back after 20 years.
+
+  # --- OWNERSHIP TYPE REJECTS ---
+  - id: neg_pe_backed
+    expect: reject
+    labels: {geo_correct: true, owner_correct: true, private_company: false, size_correct: true, succession_signal: true, overall_fit: false}
+    lead:
+      company: Apex Portfolio Foods
+      contact_name: Tom Reed
+      contact_title: CEO
+      company_city: Ottawa
+      employee_count: 150
+      signal: Portfolio company of Northbridge Private Equity. CEO exploring strategic options.
+
+  - id: neg_public
+    expect: reject
+    labels: {geo_correct: true, owner_correct: true, private_company: false, size_correct: true, succession_signal: false, overall_fit: false}
+    lead:
+      company: Northern Rail Corp
+      contact_name: Eva Stone
+      contact_title: President
+      company_city: Ottawa
+      employee_count: 400
+      signal: Publicly traded manufacturer listed on TSX.
+
+  - id: neg_subsidiary
+    expect: reject
+    labels: {geo_correct: true, owner_correct: true, private_company: false, size_correct: true, succession_signal: false, overall_fit: false}
+    lead:
+      company: Acme Canada Inc
+      contact_name: Paul Green
+      contact_title: President
+      company_city: Ottawa
+      employee_count: 220
+      signal: A wholly owned subsidiary of Acme Global PLC.
+
+  - id: neg_nonprofit
+    expect: reject
+    labels: {geo_correct: true, owner_correct: true, private_company: false, size_correct: true, succession_signal: false, overall_fit: false}
+    lead:
+      company: Ottawa Community Health Network
+      contact_name: Dana Fox
+      contact_title: Executive Director
+      company_city: Ottawa
+      employee_count: 90
+      signal: Non-profit organization serving Eastern Ontario.
+
+  # --- SIZE REJECTS ---
+  - id: neg_too_small
+    expect: reject
+    labels: {geo_correct: true, owner_correct: true, private_company: true, size_correct: false, succession_signal: true, overall_fit: false}
+    lead:
+      company: Tiny Ottawa Consulting
+      contact_name: Kim Adler
+      contact_title: Founder
+      company_city: Ottawa
+      employee_count: 7
+      signal: Founder retiring; succession planning.
+
+  - id: neg_too_large
+    expect: reject
+    labels: {geo_correct: true, owner_correct: true, private_company: true, size_correct: false, succession_signal: true, overall_fit: false}
+    lead:
+      company: Mega Eastern Conglomerate
+      contact_name: Victor Hale
+      contact_title: Founder & Chairman
+      company_city: Ottawa
+      employee_count: 5000
+      signal: Ownership transition after 40 years.
+
+  # --- BROKER / COMPETITOR ---
+  - id: neg_broker
+    expect: reject
+    labels: {geo_correct: true, owner_correct: false, private_company: true, size_correct: true, succession_signal: false, overall_fit: false}
+    lead:
+      company: Sunbelt Business Brokers Ottawa
+      contact_name: Mike Sale
+      contact_title: Broker
+      company_city: Ottawa
+      employee_count: 25
+      signal: Business for sale listings across Eastern Ontario.
+
+  # --- COUNTER-SIGNAL (should not auto-qualify) ---
+  - id: research_aggressive_expansion
+    expect: research_required
+    labels: {geo_correct: true, owner_correct: true, private_company: true, size_correct: true, succession_signal: true, overall_fit: false}
+    lead:
+      company: GrowthFab Ottawa
+      contact_name: Nina Park
+      contact_title: Founder & CEO
+      company_city: Ottawa
+      employee_count: 65
+      signal: Leadership transition while expanding aggressively and opening new locations after fundraising.

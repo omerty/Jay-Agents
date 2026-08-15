@@ -39,11 +39,30 @@ def qualify_prospect(
     employee_count: int | None = None,
     company: str | None = None,
     fallback: bool = True,
+    two_pass: bool | None = None,
 ) -> dict:
     from .llm import LLMError
+    import os
+
+    if two_pass is None:
+        two_pass = os.getenv("QUALIFY_TWO_PASS", "true").lower() not in ("0", "false", "no")
 
     if use_llm:
         try:
+            if two_pass:
+                gate = _qualify_pass1_gate(
+                    config, prospect, research_context, employee_count, company=company
+                )
+                if not gate.get("pass"):
+                    result = {
+                        "score": min(gate.get("score", 20), 30),
+                        "tier": "cold",
+                        "reasons": gate.get("reasons") or ["Failed pass-1 gate"],
+                        "talking_points": [],
+                        "recommendation": "Skip — failed extraction gate",
+                        "mode": "pass1_gate",
+                    }
+                    return _apply_disqualifiers(result, config, prospect, company)
             result = _qualify_with_llm(
                 config, prospect, research_context, employee_count, company=company
             )
@@ -58,6 +77,59 @@ def qualify_prospect(
             return _apply_disqualifiers(result, config, prospect, company)
     result = _qualify_keywords(config, prospect, company=company)
     return _apply_disqualifiers(result, config, prospect, company)
+
+
+def _qualify_pass1_gate(
+    config: dict,
+    prospect: str,
+    research_context: str | None,
+    employee_count: int | None,
+    *,
+    company: str | None = None,
+) -> dict:
+    """Pass 1 (Haiku): structured extraction + hard gates."""
+    from .llm import chat_json
+    from .llm_optimize import task_defaults, truncate_context
+
+    defaults = task_defaults("qualify_pass1")
+    icp = config["icp"]
+    prompt = f"""Extract structured facts and apply hard gates for ICP fit.
+
+PROSPECT: {prospect}
+COMPANY: {company or 'unknown'}
+EMPLOYEES: {employee_count or 'unknown'}
+
+RESEARCH:
+{truncate_context(research_context, defaults['context_chars']) or 'None'}
+
+ICP industries: {_industries_text(icp)}
+Min employees: {icp.get('min_employees', 1000)}
+Preferred size band: {icp.get('prefer_employees_min', 1500)}–{icp.get('prefer_employees_max', 10000)} (megabrands OK)
+
+JSON only:
+{{
+  "pass": true/false,
+  "score": 0-100,
+  "industry": "string or null",
+  "estimated_company_size": "string or null",
+  "reasons": ["why pass or fail"]
+}}"""
+
+    try:
+        result = chat_json(
+            prompt,
+            system="You extract B2B lead facts and apply hard ICP gates. JSON only.",
+            max_tokens=defaults["max_tokens"],
+            temperature=defaults["temperature"],
+            task="qualify_pass1",
+        )
+        return {
+            "pass": bool(result.get("pass")),
+            "score": int(result.get("score") or 0),
+            "reasons": result.get("reasons") or [],
+        }
+    except Exception:
+        return {"pass": True, "score": 50, "reasons": ["Pass-1 skipped — LLM error"]}
 
 
 def _industries_text(icp: dict) -> str:
@@ -164,45 +236,41 @@ def _qualify_with_llm(
     company: str | None = None,
 ) -> dict:
     from .llm import chat_json, resolve_provider
+    from .llm_optimize import task_defaults, truncate_context
+    from .retrieval import build_cached_working_memory, build_context
 
     prompts = config.get("prompts") or {}
-    icp = config["icp"]
+    defaults = task_defaults("qualify")
     size_note = ""
     if employee_count:
         size_note = f"\nKNOWN EMPLOYEE COUNT: {employee_count:,}"
 
-    geo_note = _geo_text(icp)
-    geo_line = f"\n- Geography: {geo_note}" if geo_note else ""
     company_line = f"\nCOMPANY: {company}" if company else ""
-    qualify_extra = (prompts.get("qualify_extra") or "").strip()
-    extra_block = ""
-    if qualify_extra:
-        extra_block = f"""
-CUSTOM INSTRUCTIONS (you MUST follow these — they override generic scoring when they conflict):
-{qualify_extra}
-"""
 
-    prompt = f"""You are a B2B sales analyst qualifying prospects for {config['company']}.
+    # Cached working memory (ICP + exclusions + few-shots) — stable across leads
+    base = prompts.get("qualify_system") or DEFAULT_QUALIFY_SYSTEM
+    system = f"{base}\n\n{build_cached_working_memory(config, task='qualify')}"
 
-PRODUCT: {config['product']}
-TAGLINE: {config['tagline']}
+    research_trimmed = truncate_context(research_context, defaults["context_chars"])
+    db_state = ""
+    if company:
+        try:
+            db_state = build_context(company, agent=config.get("name") or "woodway")
+        except Exception:
+            db_state = ""
 
-IDEAL CUSTOMER PROFILE:
-- Industries: {_industries_text(icp)}
-- Target titles: {', '.join(icp.get('titles', []))}
-- Company size: {_size_text(icp)}{geo_line}
-- Disqualifiers (penalize heavily or score below 30): {', '.join(config.get('disqualifiers', []))}
-- Blocklist terms (score ≤25 if matched): {', '.join(config.get('blocklist') or []) or 'none'}
+    prompt = f"""Score this prospect 0-100 against the ICP. Be realistic and use the FULL score range.
+Most prospects should land 40-70. Reserve 80+ for exceptional fit with clear industry + title match.
+Apply disqualifiers and blocklist strictly — score ≤25 for blocklist matches.
 {size_note}
 {company_line}
 
 PROSPECT: {prospect}
 
+{db_state}
+
 WEB RESEARCH:
-{research_context or 'None available'}
-{extra_block}
-Score this prospect 0-100 against the ICP. Be realistic — use research if helpful.
-Apply disqualifiers and blocklist strictly. Custom instructions above take priority.
+{research_trimmed or 'None available'}
 
 Respond with ONLY valid JSON (no markdown):
 {{
@@ -217,13 +285,16 @@ Respond with ONLY valid JSON (no markdown):
 
     result = chat_json(
         prompt,
-        system=prompts.get("qualify_system") or DEFAULT_QUALIFY_SYSTEM,
+        system=system,
+        max_tokens=defaults["max_tokens"],
+        temperature=defaults["temperature"],
+        task="qualify",
     )
 
     score = int(result.get("score", 0))
     tier = result.get("tier") or ("hot" if score >= 75 else "warm" if score >= 50 else "cold")
 
-    return {
+    out = {
         "score": score,
         "tier": tier,
         "industries": result.get("industries") or [],
@@ -237,6 +308,85 @@ Respond with ONLY valid JSON (no markdown):
         "succession_signals": result.get("succession_signals"),
         "mode": resolve_provider()["provider"],
     }
+    calibrated = _calibrate_score(out, config, prospect, company)
+    # Closed-loop learning from past replies
+    try:
+        from .outcomes import apply_learning_boost
+
+        industries = calibrated.get("industries") or []
+        ind = industries[0] if industries else None
+        new_score, learn_reasons = apply_learning_boost(
+            calibrated["score"],
+            ind,
+            calibrated.get("title") or prospect,
+            agent=config.get("name") or "woodway",
+        )
+        if learn_reasons:
+            calibrated["score"] = new_score
+            calibrated["reasons"] = list(calibrated.get("reasons") or []) + learn_reasons
+            calibrated["tier"] = (
+                "hot" if new_score >= 75 else "warm" if new_score >= 50 else "cold"
+            )
+    except Exception:
+        pass
+    return calibrated
+
+
+def _calibrate_score(
+    result: dict,
+    config: dict,
+    prospect: str,
+    company: str | None = None,
+) -> dict:
+    """Post-LLM calibration — spread scores, enforce industry fit for HOT."""
+    from .negative_list import is_excluded
+
+    out = dict(result)
+    score = int(out.get("score") or 0)
+    text = _match_text(prospect, company)
+    reasons = list(out.get("reasons") or [])
+
+    excluded = is_excluded(company or prospect.split(" at ")[-1], agent=config.get("name", "woodway"), extra_text=text)
+    if excluded:
+        score = min(score, BLOCKLIST_SCORE_CAP)
+        reasons.append(f"Negative list: {excluded}")
+
+    industries = [str(i).lower() for i in (out.get("industries") or [])]
+    icp_inds = config.get("icp", {}).get("industries") or []
+    if isinstance(icp_inds, str):
+        icp_inds = [icp_inds]
+    # Soft industries that inflate scores without proving buyer fit
+    weak_only = {"technology", "tech", "software", "saas", "consulting"}
+    strong_inds = [i for i in industries if i not in weak_only]
+
+    has_industry = bool(strong_inds)
+    if not has_industry and icp_inds:
+        for ind in icp_inds:
+            if ind.lower() in weak_only:
+                continue
+            keywords = KEYWORD_MAP.get(ind, [ind.lower()])
+            if any(kw in text for kw in keywords):
+                has_industry = True
+                break
+
+    if not has_industry:
+        score = min(score, 55)
+        reasons.append("No clear ICP industry match — capped score")
+
+    # Need industry + title for HOT (75+)
+    if score >= 75 and not (has_industry and out.get("title")):
+        score = min(score, 68)
+        reasons.append("Score capped — need industry + title match for HOT")
+
+    if score >= 80 and not (has_industry and out.get("title")):
+        score = min(score, 68)
+
+    out["score"] = max(0, min(100, score))
+    out["reasons"] = reasons
+    out["tier"] = (
+        "hot" if out["score"] >= 75 else "warm" if out["score"] >= 50 else "cold"
+    )
+    return out
 
 
 def _qualify_keywords(config: dict, prospect: str, company: str | None = None) -> dict:

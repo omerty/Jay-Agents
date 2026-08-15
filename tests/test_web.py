@@ -20,9 +20,11 @@ def test_health(client):
 
 
 def test_contact_search_requires_key(client, monkeypatch):
+    monkeypatch.setenv("WOODWAY_COMPANY_DISCOVERY", "actava")
     monkeypatch.delenv("APOLLO_API_KEY", raising=False)
     monkeypatch.delenv("PDL_API_KEY", raising=False)
     monkeypatch.delenv("CONTACTS_PROVIDER", raising=False)
+    monkeypatch.delenv("ACTAVA_API_KEY", raising=False)
     r = client.post("/api/agents/woodway/run", json={"mode": "contact_search", "mock": True})
     assert r.status_code == 503
 

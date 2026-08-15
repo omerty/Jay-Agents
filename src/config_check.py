@@ -47,7 +47,7 @@ def validate_config() -> dict:
         warnings.append(f"Microsoft Email not connected ({microsoft.get('detail')})")
 
     delay = float(os.getenv("LLM_CALL_DELAY", "0"))
-    if llm["ok"] and llm.get("provider") == "groq" and delay < 2.0:
+    if llm.get("ok") and llm.get("provider") == "groq" and delay < 2.0:
         warnings.append(
             "Groq free tier: set LLM_CALL_DELAY=2.5 in .env to avoid rate limits during daily runs"
         )

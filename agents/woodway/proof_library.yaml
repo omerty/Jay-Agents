@@ -1,0 +1,63 @@
+# Approved Woodway / EviData claims — inject into outreach prompts only.
+# Any factual product/regulatory claim in a draft must map to an entry here.
+# Literature entries are for credibility framing — cite lightly, never overclaim.
+
+claims:
+  - id: evidata_core
+    text: "EviData quantifies re-identification risk in anonymized datasets."
+    tags: [product, core]
+
+  - id: governance_metrics
+    text: "EviData gives Data and AI Governance teams defensible metrics for leadership and compliance conversations."
+    tags: [governance, metrics]
+
+  - id: expert_determination
+    text: "EviData supports expert determination workflows for anonymized data sharing."
+    tags: [healthcare, pharma, methodology]
+
+  - id: scale_problem
+    text: "Manual expert determination does not scale across hundreds of datasets."
+    tags: [vp_data_governance, scale]
+
+  - id: regulator_defensibility
+    text: "EviData helps evidence re-identification risk assessments to regulators."
+    tags: [cpo, legal, defensibility]
+
+  - id: revenue_unblock
+    text: "Quantified risk can shorten privacy review for data-sharing partnerships."
+    tags: [cdo, partnerships]
+
+  - id: ai_governance
+    text: "De-identified corpora used for AI training still carry re-identification risk that should be measured."
+    tags: [ai_governance]
+
+  # ---- Domain literature (cite carefully; do not invent numbers) ----
+  - id: lit_rocher_2019
+    text: "Peer-reviewed work (Rocher, Hendrickx, de Montjoye, 2019) shows re-identification risk in incomplete datasets is often underestimated."
+    tags: [literature, cpo, methodology, credibility]
+
+  - id: lit_sweeney_kanon
+    text: "Classic k-anonymity research (Sweeney) showed that combinations like ZIP, birth date, and gender uniquely identify a large share of the US population."
+    tags: [literature, methodology, credibility]
+
+  - id: lit_wp29_2014
+    text: "EU guidance (Article 29 WP Opinion 05/2014) treats anonymisation as a risk-based assessment, not a one-time checkbox."
+    tags: [literature, eu, dpo, credibility]
+
+  - id: lit_el_emam
+    text: "De-identification methodology literature (incl. El Emam) emphasizes measurable residual risk, not binary 'anonymous / not'."
+    tags: [literature, methodology, healthcare]
+
+  - id: lit_nist_privacy
+    text: "Frameworks like the NIST Privacy Framework and IAPP practice guides frame privacy programs around measurable risk and governance — not tool checklists."
+    tags: [literature, governance, credibility]
+
+case_studies: []
+
+stats: []
+
+forbidden:
+  - "named customer without approval"
+  - "specific ROI percentages not in this file"
+  - "regulatory approval claims"
+  - "claiming a paper proves EviData specifically"

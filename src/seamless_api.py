@@ -27,16 +27,21 @@ class SeamlessError(Exception):
 
 
 class SeamlessClient:
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, *, access_token: str | None = None):
+        self.access_token = (access_token or "").strip() or None
         self.api_key = (api_key or os.getenv("SEAMLESS_API_KEY", "")).strip()
-        if not self.api_key:
+        if not self.access_token and not self.api_key:
             raise SeamlessError(
-                "SEAMLESS_API_KEY not set. Create one at "
-                "https://login.seamless.ai/settings/public-api"
+                "Seamless not connected — add SEAMLESS_API_KEY or Connect Seamless (OAuth) in the dashboard"
             )
         self.last_credits: int | None = None
 
     def _headers(self) -> dict:
+        if self.access_token:
+            return {
+                "Authorization": f"Bearer {self.access_token}",
+                "Content-Type": "application/json",
+            }
         return {"Token": self.api_key, "Content-Type": "application/json"}
 
     def _request(self, method: str, path: str, **kwargs) -> dict:
@@ -155,12 +160,21 @@ def seamless_transport() -> str:
 
 
 def seamless_available() -> bool:
+    from .seamless_oauth import oauth_connected
+
+    if oauth_connected():
+        return True
     key = os.getenv("SEAMLESS_API_KEY", "").strip().lower()
     return bool(key) and key not in ("your_key_here", "changeme", "xxx", "test", "sk_test")
 
 
 def get_seamless_client():
-    """Return REST or MCP client based on SEAMLESS_TRANSPORT."""
+    """Return REST or MCP client. OAuth Bearer preferred over API key."""
+    from .seamless_oauth import get_valid_access_token
+
+    access = get_valid_access_token()
+    if access:
+        return SeamlessClient(access_token=access)
     if seamless_transport() == "mcp":
         from .seamless_mcp import SeamlessMcpClient
 

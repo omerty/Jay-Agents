@@ -2,6 +2,7 @@
 
 from ddgs import DDGS
 
+from .llm_optimize import research_max_results
 
 DEFAULT_KEYWORDS = 'privacy OR "data governance" OR anonymization'
 
@@ -9,13 +10,15 @@ DEFAULT_KEYWORDS = 'privacy OR "data governance" OR anonymization'
 def research_prospect(
     prospect: str,
     company: str | None = None,
-    max_results: int = 5,
+    max_results: int | None = None,
     keywords: str | None = None,
 ) -> list[dict]:
     """
     Search the web for context about a prospect or company.
     Returns list of {title, snippet, url}.
     """
+    if max_results is None:
+        max_results = research_max_results()
     query = company or prospect
     search_q = f'"{query}" {keywords or DEFAULT_KEYWORDS}'
 
@@ -29,7 +32,6 @@ def research_prospect(
                     "url": hit.get("href", ""),
                 })
     except Exception:
-        # search can fail intermittently; return empty rather than crash
         return []
 
     return results
@@ -42,7 +44,7 @@ def format_research(results: list[dict]) -> str:
     for i, r in enumerate(results, 1):
         lines.append(f"{i}. {r['title']}")
         if r["snippet"]:
-            lines.append(f"   {r['snippet'][:300]}")
+            lines.append(f"   {r['snippet'][:220]}")
         if r["url"]:
             lines.append(f"   {r['url']}")
     return "\n".join(lines)

@@ -275,6 +275,143 @@ def _apollo_search_and_import(agent: str, *, limit: int, skip_existing: bool, em
     }
 
 
+def search_and_import_contacts_for_companies(
+    agent: str,
+    company_names: list[str],
+    *,
+    limit: int = 25,
+    skip_existing: bool = True,
+    on_progress=None,
+) -> dict:
+    """Find ICP contacts at specific companies — Apollo first (free search), PDL if configured."""
+    emit = on_progress or (lambda msg: None)
+    names = [n.strip() for n in company_names if n and n.strip()]
+    if not names:
+        return {
+            "provider": resolve_contacts_provider(),
+            "imported": 0,
+            "updated": 0,
+            "skipped": True,
+            "with_email": 0,
+            "errors": [],
+        }
+
+    provider = resolve_contacts_provider()
+
+    if os.getenv("APOLLO_API_KEY"):
+        try:
+            return _apollo_search_for_companies(
+                agent, names, limit=limit, skip_existing=skip_existing, emit=emit
+            )
+        except ContactsError as e:
+            if provider == "apollo":
+                raise
+            emit(f"Apollo unavailable ({e}) — trying PDL")
+
+    if provider == "pdl" and os.getenv("PDL_API_KEY"):
+        from .pdl import search_and_import
+        from .pdl_api import PDLError
+
+        emit(f"Searching PDL (up to {limit} contacts, 1 credit each)…")
+        try:
+            result = search_and_import(agent, limit=limit, skip_existing=skip_existing)
+        except PDLError as e:
+            if e.status_code == 402 and os.getenv("APOLLO_API_KEY"):
+                raise ContactsError(
+                    "PDL credits exhausted — set CONTACTS_PROVIDER=apollo in .env (Apollo search is free)"
+                ) from e
+            raise ContactsError(str(e)) from e
+        result["provider"] = "pdl"
+        result["fallback"] = True
+        return result
+
+    raise ContactsError(
+        "No contact provider available — set APOLLO_API_KEY (free search) or wait for PDL credits to reset"
+    )
+
+
+def _apollo_search_for_companies(
+    agent: str,
+    company_names: list[str],
+    *,
+    limit: int,
+    skip_existing: bool,
+    emit,
+) -> dict:
+    from .apollo_api import ApolloClient, ApolloError
+
+    client = ApolloClient()
+    filters = _apollo_filters(agent)
+    titles = filters.get("person_titles") or []
+
+    emit(f"Apollo search at {len(company_names)} companies (free, no PDL credits)…")
+    people: list[dict] = []
+    seen_ids: set[str] = set()
+
+    for company in company_names:
+        if len(people) >= limit:
+            break
+        try:
+            result = client.search_people(
+                person_titles=titles or None,
+                person_seniorities=filters.get("person_seniorities") or None,
+                organization_num_employees_ranges=filters.get("organization_num_employees_ranges") or None,
+                q_organization_name=company,
+                per_page=min(5, limit - len(people)),
+            )
+        except ApolloError as e:
+            logger.warning("Apollo search failed for %s: %s", company, e)
+            continue
+        for person in result.get("people") or []:
+            pid = person.get("id")
+            if pid and pid in seen_ids:
+                continue
+            if pid:
+                seen_ids.add(pid)
+            people.append(person)
+            if len(people) >= limit:
+                break
+
+    emit(f"{len(people)} contacts found via Apollo")
+
+    imported = updated = skipped = 0
+    errors: list[str] = []
+    init_db()
+    for person in people[:limit]:
+        try:
+            lead = _apollo_lead(person)
+            if not lead:
+                skipped += 1
+                continue
+            if skip_existing and _contact_seen(lead, agent):
+                skipped += 1
+                continue
+            record = {k: v for k, v in lead.items() if not k.startswith("_")}
+            record["prospect"] = build_prospect_string(record)
+            _, created = upsert_lead(record, agent=agent)
+            if created:
+                imported += 1
+            else:
+                updated += 1
+        except Exception as e:
+            errors.append(str(e))
+
+    if not people and not os.getenv("APOLLO_API_KEY"):
+        raise ContactsError("APOLLO_API_KEY not set")
+
+    return {
+        "provider": "apollo",
+        "searched": len(people),
+        "credits_used": 0,
+        "imported": imported,
+        "updated": updated,
+        "skipped": skipped,
+        "with_email": 0,
+        "errors": errors,
+        "companies": len(company_names),
+    }
+
+
 def _contact_seen(lead: dict, agent: str) -> bool:
     """A contact is a duplicate if the same person already exists at that company."""
     if not lead.get("contact_name"):

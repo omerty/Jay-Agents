@@ -65,28 +65,35 @@ prompts:
     Jay prospects business OWNERS in Ottawa and Eastern Ontario (including Kingston, Cornwall)
     who may want to SELL their business. Ideal deal size is $10–100M valuation. Sector-agnostic.
 
-    Score using these weights:
-    - Geography (Ottawa/Eastern Ontario): 20%
-    - Owner decision-maker (Owner/Founder/President of private company): 20%
-    - Estimated company size/valuation ($10–100M): 30%
-    - Succession/exit signals: 15%
-    - Business quality (25+ years, multi-location, stable B2B): 10%
-    - Research confidence: 5%
+    Score using these weights (dimensional):
+    - Geography (corridor HQ — Ottawa/Kingston/Cornwall etc., NOT "Ontario" alone): 0–20
+    - Owner decision-maker (Owner/Founder/President of private company): 0–20
+    - Estimated company size (20–500 employees sweet spot): 0–20
+    - Succession/exit signals: 0–25
+    - Business quality (longevity, multi-location, B2B): 0–10
+    - Research confidence: 0–5
 
-    Succession signals (add 10–20 points when present): founder since 1980s–2000s, family-owned,
-    owner age 55+, no obvious successor, long tenure, "next chapter" language, President=Founder.
+    CRITICAL: "family owned" or "privately held" alone is NOT an exit signal (tier 0 context).
+    Tier 1+: founder longevity 30+ years, second generation in leadership, leadership transition.
+    Tier 2+: stepping back, succession planning, next chapter, new president.
+    Tier 3+: retirement, ownership transition underway.
+    Tier 4 (for sale / seeking buyer) is discovery-useful but do NOT frame outreach as "we saw you're selling."
 
     Hard-skip: M&A brokers, marketplaces, accounting/law/investment banking firms, PE, search funds,
-    government, nonprofits, franchisors. Score corporate VPs at national brands below 30.
+    government, nonprofits, franchisors, Toronto/GTA HQ, subsidiaries, corporate regional presidents.
+    Score corporate VPs at national brands below 30.
 
-    Employee proxy: 20–500 employees = sweet spot; under 15 likely too small; 5,000+ too large.
+    Always produce: why_now (why contact now), why_not (concerns), and a short M&A thesis.
+    If you cannot write a credible why_now, recommend research_further — do not qualify for outreach.
 
     In JSON also include when inferable: confidence (0-100), estimated_company_size (e.g. "$15M-$30M"),
-    ownership_confidence (high/medium/low), succession_signals (array).
+    ownership_confidence (high/medium/low), succession_signals (array), why_now, why_not.
   outreach_system: "You write discreet, respectful owner-to-advisor emails for Keira Capital. Output the complete email only."
   outreach_extra: |
-    Keep it confidential and low-pressure. Never mention that you found them on a listing site.
+    Keep it confidential and low-pressure. Never mention Seamless, directories, or listing sites.
+    Consume the M&A thesis / why_now — do not invent succession facts not in the brief.
     Frame as a discreet conversation about strategic options or succession — not a hard sell.
+    Never imply the owner is selling or that you know they want to sell.
 
 research_keywords: 'owner OR founder OR "family business" OR succession OR "looking to sell" OR retirement'
 
@@ -127,7 +134,10 @@ apollo:
 actava:
   max_queries: 8
   results_per_query: 5
+  # Use shared ACTAVA_AGENT_ID with Keira ICP prompt (proven strong Eastern Ontario owners)
+  use_shared_agent: true
   # Optional override for external agent runs (see actava_agent.yaml for full blueprint)
+  # agent_id:
   # prospect_prompt: |
   #   Find {limit} owner-operated businesses in Ottawa/Eastern Ontario...
 
@@ -144,16 +154,12 @@ seamless:
     - CEO
   seniority:
     - C-Level
-    - VP
-    - Director
   company_size:
     - 11 - 50
     - 51 - 200
     - 201 - 500
-  company_revenue:
-    - $5M - $20M
-    - $20M - $50M
-    - $50M - $100M
+  # Intentionally omit company_revenue + contact_keyword on base search —
+  # those made Seamless return 0 candidates. City targeting uses lighter queries below.
   company_founded_on:
     - 10+ Years
   industry:
@@ -163,9 +169,28 @@ seamless:
     - Wholesale & Distribution
     - Facilities Services
     - IT Services
-  contact_keyword:
-    - family business
-    - succession
+  # Multi-query free discovery (merged + deduped). Keep each query lighter than the old mega-filter.
+  # City targeting uses companyCity (corridor geo), not succession contact_keyword.
+  discovery_queries:
+    - name: ontario_owners
+      # geo + title + size only
+      omit: [industry, company_founded_on, company_revenue, contact_keyword]
+    - name: ottawa_corridor
+      company_city: [Ottawa, Kanata, Nepean]
+      job_title: [Owner, Founder, President, CEO]
+      omit: [industry, company_revenue, company_founded_on, contact_keyword]
+    - name: kingston_owners
+      company_city: [Kingston]
+      job_title: [Owner, Founder, President, CEO]
+      omit: [industry, company_revenue, company_founded_on, contact_keyword]
+    - name: eastern_cities
+      company_city: [Cornwall, Belleville, Pembroke, Brockville]
+      job_title: [Owner, Founder, President, CEO]
+      omit: [industry, company_revenue, company_founded_on, contact_keyword]
+    - name: corridor_towns
+      company_city: [Renfrew, "Smiths Falls", Arnprior, Hawkesbury, Perth, "Carleton Place", Gatineau, Orleans]
+      job_title: [Owner, Founder, President, CEO]
+      omit: [industry, company_revenue, company_founded_on, contact_keyword]
 
 pdl:
   job_title_keywords:
@@ -183,3 +208,77 @@ pdl:
   filter_industries: false
   per_page: 25
   location_region: "ontario"
+
+# Company-first M&A intelligence pipeline (src/keira_pipeline.py)
+keira:
+  geography:
+    primary:
+      - Ottawa
+      - Kingston
+      - Cornwall
+      - Kanata
+      - Belleville
+      - Pembroke
+    reject_hq:
+      - Toronto
+      - Mississauga
+      - GTA
+  company:
+    min_employees: 15
+    max_employees: 1500
+  ownership:
+    allowed:
+      - founder_owned
+      - family_owned
+      - privately_owned
+      - unknown_private
+    rejected:
+      - public
+      - subsidiary
+      - private_equity
+      - nonprofit
+      - government
+      - franchisor
+  succession:
+    minimum_score: 0.55
+    # Family-owned / privately held alone = tier 0 (context, not exit)
+  gates:
+    min_geo: 18
+    min_owner_confidence: 0.75
+    min_succession: 0.55
+    min_evidence_signals: 2
+    # Strong city required for credit spend (not vague "Ontario")
+    require_strong_geo: true
+  research:
+    max_seamless_credits: 12
+    max_claude_research: 8
+    require_sources: 2
+    cooldown_days: 90
+    memory: true
+    event_rediscovery: true
+    # Contact fill: auto|web|seamless|paid (same stack as Woodway)
+    contact_discovery: seamless
+    # Actava primary (shared agent + Keira ICP prompt), Seamless widen, Anthropic only if thin
+    stack_actava: true
+    stack_anthropic: true
+    # Soft enrich needs real succession (tier≥2); drafts need tier≥3 + why_now
+    enrich_min_succession_tier: 2
+    draft_min_succession_tier: 3
+    min_enrich_score: 70
+    min_draft_score: 80
+  models:
+    # Uses MODEL_QUALIFY / MODEL_CRITIQUE env when set; else Anthropic defaults
+    analyst: sonnet
+    critic: haiku
+  outreach:
+    require:
+      - verified_owner
+      - verified_geography
+      - mna_thesis
+      - critic_approved
+    gates:
+      min_succession_confidence: 0.45
+      min_owner_confidence: 0.75
+      min_geo_confidence: 0.85
+      min_evidence_count: 2
+

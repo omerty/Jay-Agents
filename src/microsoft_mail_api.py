@@ -425,7 +425,10 @@ def create_draft(to: str, subject: str, body: str) -> dict:
 
 
 def send_draft(draft_id: str) -> dict:
-    """Send an existing draft — only call after explicit user confirmation."""
+    """Send an existing draft — only via explicit dashboard confirm (web.py).
+
+    Must never be imported by pipeline / sequences / daily modules.
+    """
     _graph_request("POST", f"/me/messages/{draft_id}/send")
     # After send, message moves out of drafts; re-fetch by id may 404.
     # Return the draft_id as message_id; conversation id must already be on the lead.
@@ -433,7 +436,10 @@ def send_draft(draft_id: str) -> dict:
 
 
 def send_message(to: str, subject: str, body: str) -> dict:
-    """Compose and send directly — only call after explicit user confirmation."""
+    """Compose and send directly — only via explicit dashboard confirm (web.py).
+
+    Must never be imported by pipeline / sequences / daily modules.
+    """
     if not to or "@" not in to:
         raise MicrosoftMailError(f"Invalid recipient email: {to!r}")
     sender = _connected_sender()
@@ -466,6 +472,42 @@ def conversation_has_reply(messages: list[dict], our_email: str, our_message_id:
         if from_addr and from_addr != ours:
             return True
     return False
+
+
+def fetch_reply_body(conversation_id: str, our_email: str, our_message_id: str | None = None) -> str:
+    """Fetch the latest inbound reply body from an Outlook conversation."""
+    safe_id = conversation_id.replace("'", "''")
+    try:
+        data = _graph_request(
+            "GET",
+            f"/me/messages?$select=id,from,conversationId,body,bodyPreview"
+            f"&$filter=conversationId eq '{safe_id}'"
+            f"&$orderby=receivedDateTime desc"
+            f"&$top=20",
+        ) or {}
+    except Exception as e:
+        logger.warning("Could not fetch conversation body %s: %s", conversation_id, e)
+        return ""
+
+    ours = (our_email or "").lower()
+    for msg in data.get("value") or []:
+        if our_message_id and msg.get("id") == our_message_id:
+            continue
+        from_addr = (
+            ((msg.get("from") or {}).get("emailAddress") or {}).get("address") or ""
+        ).lower()
+        if not from_addr or from_addr == ours:
+            continue
+        body = msg.get("body") or {}
+        content = (body.get("content") or "").strip()
+        if body.get("contentType") == "html" and content:
+            import re
+            content = re.sub(r"<[^>]+>", " ", content)
+        if not content:
+            content = (msg.get("bodyPreview") or "").strip()
+        if content:
+            return content
+    return ""
 
 
 def scan_replies() -> dict:
@@ -516,7 +558,13 @@ def scan_replies() -> dict:
 
         if conversation_has_reply(messages, our_email, row["gmail_message_id"]):
             who = row["contact_name"] or row["company"]
+            reply_body = fetch_reply_body(conv_id, our_email, row["gmail_message_id"])
             set_lead_fields(row["id"], status="replied")
+            try:
+                from .reply_classify import process_reply_for_lead
+                process_reply_for_lead(row["id"], reply_body, agent=row["agent"])
+            except Exception as e:
+                logger.warning("Reply classification failed for lead %s: %s", row["id"], e)
             create_notification(
                 f"{who} ({row['company']}) replied to your outreach email",
                 agent=row["agent"],

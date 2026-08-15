@@ -388,14 +388,20 @@ def strip_subject_line(body: str) -> str:
 
 
 def send_draft(draft_id: str) -> dict:
-    """Send an existing draft — only call after explicit user confirmation."""
+    """Send an existing draft — only via explicit dashboard confirm (web.py).
+
+    Must never be imported by pipeline / sequences / daily modules.
+    """
     svc = _service()
     sent = svc.users().drafts().send(userId="me", body={"id": draft_id}).execute()
     return {"message_id": sent.get("id"), "thread_id": sent.get("threadId")}
 
 
 def send_message(to: str, subject: str, body: str) -> dict:
-    """Compose and send directly — only call after explicit user confirmation."""
+    """Compose and send directly — only via explicit dashboard confirm (web.py).
+
+    Must never be imported by pipeline / sequences / daily modules.
+    """
     if not to or "@" not in to:
         raise GmailError(f"Invalid recipient email: {to!r}")
     svc = _service()
@@ -422,6 +428,83 @@ def thread_has_reply(thread: dict, our_email: str, our_message_id: str | None = 
         if sender and sender != ours:
             return True
     return False
+
+
+def _decode_gmail_body(payload: dict | None) -> str:
+    """Extract plain-text body from a Gmail message payload."""
+    import base64
+
+    if not payload:
+        return ""
+
+    def decode_data(data: str) -> str:
+        try:
+            raw = base64.urlsafe_b64decode(data + "===")
+            return raw.decode("utf-8", errors="ignore")
+        except Exception:
+            return ""
+
+    mime = (payload.get("mimeType") or "").lower()
+    body = payload.get("body") or {}
+    if body.get("data") and mime.startswith("text/plain"):
+        return decode_data(body["data"])
+
+    parts = payload.get("parts") or []
+    plain = html = ""
+    for part in parts:
+        p_mime = (part.get("mimeType") or "").lower()
+        data = (part.get("body") or {}).get("data")
+        if not data and part.get("parts"):
+            nested = _decode_gmail_body(part)
+            if nested:
+                return nested
+        if not data:
+            continue
+        text = decode_data(data)
+        if p_mime.startswith("text/plain") and text:
+            plain = text
+        elif p_mime.startswith("text/html") and text and not html:
+            html = text
+    if plain:
+        return plain
+    if html:
+        import re
+        return re.sub(r"<[^>]+>", " ", html)
+    if body.get("data"):
+        return decode_data(body["data"])
+    return ""
+
+
+def fetch_reply_body(thread_id: str, our_email: str, our_message_id: str | None = None) -> str:
+    """Fetch the latest inbound reply body from a Gmail thread."""
+    svc = _service()
+    try:
+        thread = (
+            svc.users().threads()
+            .get(userId="me", id=thread_id, format="full")
+            .execute()
+        )
+    except Exception as e:
+        logger.warning("Could not fetch full thread %s: %s", thread_id, e)
+        return ""
+
+    ours = (our_email or "").lower()
+    best = ""
+    for msg in thread.get("messages") or []:
+        if our_message_id and msg.get("id") == our_message_id:
+            continue
+        headers = {
+            h["name"].lower(): h["value"]
+            for h in (msg.get("payload") or {}).get("headers", [])
+        }
+        from email.utils import parseaddr
+        sender = parseaddr(headers.get("from", ""))[1].lower()
+        if not sender or sender == ours:
+            continue
+        body = _decode_gmail_body(msg.get("payload"))
+        if body.strip():
+            best = body.strip()
+    return best
 
 
 def scan_replies() -> dict:
@@ -469,7 +552,15 @@ def scan_replies() -> dict:
 
         if thread_has_reply(thread, our_email, row["gmail_message_id"]):
             who = row["contact_name"] or row["company"]
+            reply_body = fetch_reply_body(
+                row["gmail_thread_id"], our_email, row["gmail_message_id"]
+            )
             set_lead_fields(row["id"], status="replied")
+            try:
+                from .reply_classify import process_reply_for_lead
+                process_reply_for_lead(row["id"], reply_body, agent=row["agent"])
+            except Exception as e:
+                logger.warning("Reply classification failed for lead %s: %s", row["id"], e)
             create_notification(
                 f"{who} ({row['company']}) replied to your outreach email",
                 agent=row["agent"],

@@ -94,6 +94,7 @@ class ApolloClient:
         organization_locations: list[str] | None = None,
         organization_num_employees_ranges: list[str] | None = None,
         q_keywords: str | None = None,
+        q_organization_name: str | None = None,
         page: int = 1,
         per_page: int = 25,
     ) -> dict:
@@ -114,6 +115,8 @@ class ApolloClient:
             payload["organization_num_employees_ranges"] = organization_num_employees_ranges
         if q_keywords:
             payload["q_keywords"] = q_keywords
+        if q_organization_name:
+            payload["q_organization_name"] = q_organization_name
 
         return self._post("mixed_people/api_search", payload)
 

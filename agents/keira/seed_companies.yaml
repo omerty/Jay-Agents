@@ -1,0 +1,8 @@
+# Jay-editable Keira ICP seeds.
+# Used only when live discovery (Seamless/Actava/web) is thin.
+# Add privately held Eastern Ontario owner-operated companies — not brokers.
+companies: []
+# Example:
+# - name: Example Fabrication Ltd
+#   city: Ottawa
+#   signal: Long-standing Ottawa manufacturer, founder-led

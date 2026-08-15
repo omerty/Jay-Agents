@@ -1,0 +1,18 @@
+# Few-shot steering for Woodway company extraction / qualification.
+# Keep short — injected into the Anthropic cached system block.
+
+good:
+  - company: Pfizer
+    why: Large pharma with anonymized clinical / real-world data sharing; clear CPO / governance buyers
+  - company: JPMorgan Chase
+    why: Global bank with heavy data-sharing and AI governance obligations
+  - company: UnitedHealth
+    why: Healthcare payer/provider scale; de-identification and secondary use are core
+
+bad:
+  - company: Axtria
+    why: Pharma data analytics vendor — sells TO buyers, is not a buyer
+  - company: OneTrust
+    why: Privacy-tech competitor / tooling vendor
+  - company: Carrier Global
+    why: HVAC manufacturer — false positive from insurance "carrier" snippets

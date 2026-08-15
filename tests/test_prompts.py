@@ -5,8 +5,16 @@ def test_get_prompt_settings_includes_templates():
     p = get_prompt_settings("woodway")
     assert p["agent"] == "woodway"
     assert "qualify_system" in p["values"]
+    assert "analyst_system" not in p["values"]
     assert "EviData" in p["templates"]["qualify_user"]
     assert "VALUE PROPS" in p["templates"]["outreach_user"]
+
+
+def test_keira_prompt_settings_include_analyst_critic():
+    p = get_prompt_settings("keira")
+    assert "analyst_system" in p["values"]
+    assert "critic_system" in p["values"]
+    assert "M&A" in p["values"]["analyst_system"] or "succession" in p["values"]["analyst_system"].lower()
 
 
 def test_save_and_reset_prompts(tmp_path, monkeypatch):

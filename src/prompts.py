@@ -12,13 +12,31 @@ DEFAULT_OUTREACH_SYSTEM = (
     "You write B2B sales emails. Output the complete email only. No preamble or commentary."
 )
 
-PROMPT_KEYS = ("qualify_system", "qualify_extra", "outreach_system", "outreach_extra")
+DEFAULT_ANALYST_SYSTEM = """You are a senior M&A research analyst for Keira Capital Partners.
+Keira advises owners of private Eastern Ontario businesses ($10–100M) on succession / exit options.
+Output strict JSON only. Never invent facts not supported by the research packet.
+Family-owned alone is NOT exit intent. Prefer reject / research_further over weak outreach.
+"""
+
+DEFAULT_CRITIC_SYSTEM = """You are a skeptical M&A quality critic for Keira Capital.
+Approve only if the person is a credible owner, company is in Eastern Ontario corridor,
+private (not PE/sub/public), size plausible, succession evidence real, and outreach would not embarrass Keira.
+Output strict JSON only.
+"""
+
+# Shared Anthropic system / instruction keys (all agents)
+SHARED_PROMPT_KEYS = ("qualify_system", "qualify_extra", "outreach_system", "outreach_extra")
+# Keira-only Claude analyst / critic system prompts
+KEIRA_PROMPT_KEYS = ("analyst_system", "critic_system")
+PROMPT_KEYS = SHARED_PROMPT_KEYS + KEIRA_PROMPT_KEYS
 
 DEFAULTS = {
     "qualify_system": DEFAULT_QUALIFY_SYSTEM,
     "qualify_extra": "",
     "outreach_system": DEFAULT_OUTREACH_SYSTEM,
     "outreach_extra": "",
+    "analyst_system": DEFAULT_ANALYST_SYSTEM,
+    "critic_system": DEFAULT_CRITIC_SYSTEM,
 }
 
 
@@ -34,18 +52,34 @@ def get_prompt_settings(agent: str) -> dict:
     """Return editable values, defaults, and read-only template previews."""
     cfg = load_agent(agent)
     saved = _merged_prompts(cfg)
-    effective = {key: (saved.get(key) or DEFAULTS[key]) for key in PROMPT_KEYS}
-    using_defaults = {key: key not in saved or not str(saved.get(key) or "").strip() for key in PROMPT_KEYS}
+    keys = list(SHARED_PROMPT_KEYS)
+    if agent == "keira":
+        keys.extend(KEIRA_PROMPT_KEYS)
+
+    effective = {key: (saved.get(key) or DEFAULTS[key]) for key in keys}
+    using_defaults = {
+        key: key not in saved or not str(saved.get(key) or "").strip() for key in keys
+    }
 
     return {
         "agent": agent,
         "path": str(prompts_path(agent).relative_to(AGENTS_DIR.parent)),
+        "keys": keys,
         "values": effective,
         "using_defaults": using_defaults,
-        "defaults": DEFAULTS,
+        "defaults": {k: DEFAULTS[k] for k in keys},
         "templates": {
             "qualify_user": qualify_user_template(cfg),
             "outreach_user": outreach_user_template(cfg),
+        },
+        "notes": {
+            "qualify_system": (
+                "Anthropic system prompt for qualification, company extract, and digest. "
+                "Also used when discovering companies from search results."
+            ),
+            "outreach_system": "Anthropic system prompt for draft email generation.",
+            "analyst_system": "Anthropic system prompt for Keira succession analyst (Step 4).",
+            "critic_system": "Anthropic system prompt for Keira critic gate (Step 5).",
         },
     }
 
@@ -140,8 +174,12 @@ def save_prompt_settings(agent: str, values: dict) -> dict:
     path = prompts_path(agent)
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    keys = list(SHARED_PROMPT_KEYS)
+    if agent == "keira":
+        keys.extend(KEIRA_PROMPT_KEYS)
+
     cleaned: dict[str, str] = {}
-    for key in PROMPT_KEYS:
+    for key in keys:
         raw = values.get(key)
         if raw is None:
             continue

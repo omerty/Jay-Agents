@@ -18,15 +18,15 @@ from . import env  # noqa: F401 — load .env
 from .agent import run_process_imported
 from .config_check import validate_config
 from .contacts import search_and_import_contacts
-from .db import create_notification, get_leads, record_run, set_lead_fields
+from .db import create_notification, record_run
 
 logger = logging.getLogger("daily")
 
 AGENTS = ["woodway", "fonex", "keira"]
 
-CONTACT_LIMIT = int(os.getenv("DAILY_CONTACT_LIMIT", "10"))
-PROCESS_LIMIT = int(os.getenv("DAILY_PROCESS_LIMIT", "25"))
-DRAFT_MIN_SCORE = int(os.getenv("DAILY_DRAFT_MIN_SCORE", "50"))
+CONTACT_LIMIT = int(os.getenv("DAILY_CONTACT_LIMIT", "50"))
+PROCESS_LIMIT = int(os.getenv("DAILY_PROCESS_LIMIT", "50"))
+WOODWAY_DAILY_LIMIT = int(os.getenv("DAILY_WOODWAY_LIMIT", str(CONTACT_LIMIT)))
 
 
 def _now() -> str:
@@ -36,57 +36,13 @@ def _now() -> str:
 def _create_gmail_drafts(agent: str) -> tuple[int, int]:
     """Create mailbox drafts for drafted leads that have an email but no draft yet.
 
-    Prefers Gmail when connected; otherwise uses Microsoft 365 / Outlook.
+    Woodway prefers Microsoft 365 / Outlook when connected; others prefer Gmail.
     """
-    from .gmail_api import GmailError, create_draft, gmail_status
-    from .microsoft_mail_api import MicrosoftMailError, create_draft as ms_create_draft, microsoft_status
+    from .woodway_pipeline import create_mailbox_drafts
 
-    use_gmail = gmail_status()["connected"]
-    use_ms = (not use_gmail) and microsoft_status()["connected"]
-    if not use_gmail and not use_ms:
-        return 0, 0
-
-    created = 0
-    failed = 0
-    for lead in get_leads(agent=agent, status="drafted"):
-        if not lead.get("email") or lead.get("gmail_draft_id"):
-            continue
-        if (lead.get("score") or 0) < DRAFT_MIN_SCORE or not lead.get("outreach_body"):
-            continue
-        try:
-            if use_gmail:
-                result = create_draft(
-                    lead["email"],
-                    lead.get("outreach_subject") or "Quick question",
-                    lead["outreach_body"],
-                )
-                provider = "gmail"
-            else:
-                result = ms_create_draft(
-                    lead["email"],
-                    lead.get("outreach_subject") or "Quick question",
-                    lead["outreach_body"],
-                )
-                provider = "microsoft"
-        except (GmailError, MicrosoftMailError) as e:
-            logger.warning("Draft failed for lead %s: %s", lead["id"], e)
-            failed += 1
-            continue
-        set_lead_fields(
-            lead["id"],
-            gmail_draft_id=result["draft_id"],
-            gmail_thread_id=result["thread_id"],
-            gmail_message_id=result["message_id"],
-            mail_provider=provider,
-        )
-        created += 1
-        logger.info(
-            "%s draft created for %s <%s>",
-            "Gmail" if provider == "gmail" else "Outlook",
-            lead.get("contact_name"),
-            lead["email"],
-        )
-    return created, failed
+    prefer_ms = agent == "woodway"
+    result = create_mailbox_drafts(agent, prefer_microsoft=prefer_ms)
+    return result.get("created", 0), result.get("failed", 0)
 
 
 def run_daily() -> dict:
@@ -106,6 +62,62 @@ def run_daily() -> dict:
 
     for agent in AGENTS:
         agent_summary = []
+
+        # Woodway: full company→people→draft pipeline (Anthropic or Actava)
+        if agent == "woodway":
+            try:
+                from .woodway_pipeline import run_woodway_pipeline
+
+                result = run_woodway_pipeline(
+                    limit=WOODWAY_DAILY_LIMIT,
+                    use_llm=True,
+                    create_drafts=True,
+                    on_progress=lambda m: logger.info("[%s] %s", agent, m),
+                )
+                steps = result.get("steps") or {}
+                agent_summary.append(
+                    f"pipeline: {len((steps.get('digest') or {}).get('companies') or [])} companies, "
+                    f"{(steps.get('contacts') or {}).get('imported', 0)} contacts, "
+                    f"{(steps.get('process') or {}).get('count', 0)} processed, "
+                    f"{(steps.get('drafts') or {}).get('created', 0)} drafts, "
+                    f"{(steps.get('sequences') or {}).get('advanced', 0)} sequence touches"
+                )
+            except Exception as e:
+                ok = False
+                logger.exception("[%s] woodway pipeline failed", agent)
+                agent_summary.append(f"pipeline failed: {e}")
+            summary_parts.append(f"{agent}: " + ", ".join(agent_summary))
+            continue
+
+        # Keira: company-first M&A intelligence pipeline
+        if agent == "keira":
+            try:
+                from .keira_pipeline import run_keira_pipeline
+
+                result = run_keira_pipeline(
+                    limit=CONTACT_LIMIT,
+                    use_llm=True,
+                    create_drafts=True,
+                    on_progress=lambda m: logger.info("[%s] %s", agent, m),
+                )
+                steps = result.get("steps") or {}
+                gates = steps.get("gates") or {}
+                rediscovery = steps.get("rediscovery") or {}
+                agent_summary.append(
+                    f"pipeline: {gates.get('survivors', 0)} survivors "
+                    f"({gates.get('rejected', 0)} rejected, "
+                    f"{gates.get('memory_skipped', 0)} memory-skipped), "
+                    f"rediscovery {rediscovery.get('requeued', 0)}, "
+                    f"{(steps.get('process') or {}).get('count', 0)} processed, "
+                    f"{(steps.get('drafts') or {}).get('created', 0)} drafts"
+                )
+            except Exception as e:
+                ok = False
+                logger.exception("[%s] keira pipeline failed", agent)
+                agent_summary.append(f"pipeline failed: {e}")
+            summary_parts.append(f"{agent}: " + ", ".join(agent_summary))
+            continue
+
         try:
             contacts = search_and_import_contacts(
                 agent, limit=CONTACT_LIMIT, on_progress=lambda m: logger.info("[%s] %s", agent, m)
@@ -139,14 +151,14 @@ def run_daily() -> dict:
         try:
             drafts, draft_failed = _create_gmail_drafts(agent)
             if drafts:
-                agent_summary.append(f"{drafts} Gmail drafts created")
+                agent_summary.append(f"{drafts} mailbox drafts created")
             if draft_failed:
                 ok = False
                 agent_summary.append(f"{draft_failed} draft failures")
         except Exception as e:
             ok = False
-            logger.exception("[%s] Gmail drafting failed", agent)
-            agent_summary.append(f"gmail drafts failed: {e}")
+            logger.exception("[%s] drafting failed", agent)
+            agent_summary.append(f"drafts failed: {e}")
 
         summary_parts.append(f"{agent}: " + ", ".join(agent_summary))
 
@@ -170,6 +182,31 @@ def run_daily() -> dict:
         ok = False
         logger.exception("reply scan failed")
         summary_parts.append(f"reply scan failed: {e}")
+
+    # Advance due sequence touches for all agents
+    try:
+        from .sequences import advance_due_sequences
+
+        for agent in AGENTS:
+            seq = advance_due_sequences(agent=agent, limit=PROCESS_LIMIT, create_drafts=True)
+            if seq.get("advanced") or seq.get("linkedin_queued"):
+                summary_parts.append(
+                    f"{agent} sequences: {seq.get('advanced', 0)} drafted, "
+                    f"{seq.get('linkedin_queued', 0)} linkedin"
+                )
+    except Exception as e:
+        logger.warning("sequence advance failed: %s", e)
+
+    # PII retention — purge stale unengaged contacts (RETENTION_MONTHS, default 18)
+    try:
+        from .compliance import purge_stale_contacts
+
+        purged = purge_stale_contacts()
+        if purged:
+            summary_parts.append(f"retention purge: {purged} stale contacts")
+            logger.info("Purged %s stale contacts (RETENTION_MONTHS)", purged)
+    except Exception as e:
+        logger.warning("retention purge failed: %s", e)
 
     summary = " | ".join(summary_parts)
     record_run("daily", ok=ok, summary=summary, started_at=started)

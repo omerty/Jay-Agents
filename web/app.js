@@ -6,7 +6,7 @@ const AGENT_COLORS = {
   keira: "#8b5cf6",
 };
 
-const STATUSES = ["discovered", "imported", "qualified", "drafted", "emailed", "replied", "skipped"];
+const STATUSES = ["discovered", "imported", "qualified", "drafted", "emailed", "replied", "awaiting_contact", "skipped"];
 
 const STATUS_COLORS = {
   discovered: "#5c6785",
@@ -16,6 +16,7 @@ const STATUS_COLORS = {
   emailed: "#8b5cf6",
   replied: "#2dd4bf",
   skipped: "#3a4257",
+  awaiting_contact: "#6b7289",
 };
 
 const SOURCE_LABELS = {
@@ -41,6 +42,9 @@ let microsoftConnected = false;
 let hunterAvailable = false;
 let modalLeadId = null;
 let promptDefaults = null;
+let reviewMode = false;
+let reviewQueue = [];
+let reviewIndex = 0;
 
 const $ = (id) => document.getElementById(id);
 
@@ -63,6 +67,7 @@ async function api(path, opts = {}) {
 async function init() {
   handleGmailOAuthReturn();
   handleMicrosoftOAuthReturn();
+  handleSeamlessOAuthReturn();
   await loadCurrentUser();
   await Promise.all([loadHealth(), loadAgents(), loadNotifications(), loadAutomation()]);
   if (agents.length) selectAgent(agents[0].name);
@@ -101,66 +106,66 @@ function showToast(msg, ok = true) {
 function renderStatusBanner(h) {
   const banner = $("status-banner");
   if (!banner) return;
+  // Only surface warnings/errors — healthy status lives in the sidebar.
   const items = [];
 
-  const llmOk = !!h.llm?.ok;
-  items.push({
-    ok: llmOk,
-    warn: false,
-    label: llmOk ? `AI ready (${h.llm.provider})` : `AI unavailable`,
-    detail: llmOk ? h.llm.model : h.llm?.detail,
-  });
+  if (!h.llm?.ok) {
+    items.push({ ok: false, warn: false, label: "AI unavailable", detail: h.llm?.detail });
+  }
 
   const contactsOk = !!h.contacts?.configured;
   const seamlessOk = !!h.seamless?.configured;
   if (seamlessOk) {
     const rem = h.seamless.credits_remaining_budget;
+    if (rem != null && rem < 500) {
+      items.push({
+        ok: true,
+        warn: true,
+        label: `Seamless low (${rem} left)`,
+        detail: `Budget ${h.seamless.credits_used ?? 0}/${h.seamless.monthly_budget ?? 10000} used this month`,
+      });
+    }
+  } else if (h.seamless?.can_connect) {
     items.push({
-      ok: true,
-      warn: rem != null && rem < 500,
-      label: `Seamless (${rem ?? "?"} credits left)`,
-      detail: `Budget ${h.seamless.credits_used ?? 0}/${h.seamless.monthly_budget ?? 10000} used this month`,
+      ok: false,
+      warn: true,
+      label: "Connect Seamless",
+      detail: h.seamless.detail || "Sign in to use your Seamless plan credits",
     });
-  } else if (h.actava?.configured) {
+  } else if (!h.actava?.configured && !contactsOk) {
     items.push({
-      ok: !!h.actava.cura?.ok,
-      warn: !h.actava.cura?.ok,
-      label: `Actava (${h.actava.mode || "ready"})`,
-      detail: h.actava.agent_id ? `Agent ${h.actava.agent_id.slice(0, 8)}…` : "Web + Cura extraction",
-    });
-  } else {
-    items.push({
-      ok: contactsOk,
-      warn: false,
-      label: contactsOk ? `Contacts (${h.contacts.provider})` : "Contacts not configured",
-      detail: contactsOk ? "API key configured" : "Missing API key",
+      ok: false,
+      warn: true,
+      label: "Contacts not configured",
+      detail: "Set Apollo/PDL or connect Seamless",
     });
   }
 
   const g = h.gmail || {};
-  if (g.connected) {
-    items.push({ ok: true, warn: false, label: `Gmail connected`, detail: g.email });
-  } else if (g.authenticated || g.has_token) {
-    items.push({ ok: false, warn: true, label: "Gmail setup incomplete", detail: g.detail });
-  } else {
-    items.push({ ok: false, warn: !g.needs_operator_setup, label: "Gmail not connected", detail: g.detail });
-  }
-
   const m = h.microsoft || {};
-  if (m.connected) {
-    items.push({ ok: true, warn: false, label: `Outlook connected`, detail: m.email });
-  } else if (m.authenticated || m.has_token) {
-    items.push({ ok: false, warn: true, label: "Outlook setup incomplete", detail: m.detail });
-  } else {
-    items.push({ ok: false, warn: !m.needs_operator_setup, label: "Outlook not connected", detail: m.detail });
+  if (!(g.connected || m.connected)) {
+    if (g.authenticated || g.has_token) {
+      items.push({ ok: false, warn: true, label: "Gmail setup incomplete", detail: g.detail });
+    } else if (m.authenticated || m.has_token) {
+      items.push({ ok: false, warn: true, label: "Outlook setup incomplete", detail: m.detail });
+    } else if (!g.needs_operator_setup || !m.needs_operator_setup) {
+      items.push({
+        ok: false,
+        warn: true,
+        label: "Connect email",
+        detail: "Gmail or Outlook required for drafts",
+      });
+    }
   }
 
-  if (h.config_ok) {
-    items.push({ ok: true, warn: false, label: "All systems ready", detail: "Ready for nightly automation" });
-  } else if (h.config_issues?.length) {
+  if (h.config_issues?.length) {
     items.push({ ok: false, warn: false, label: "Configuration issue", detail: h.config_issues[0] });
-  } else if (h.config_warnings?.length) {
-    items.push({ ok: false, warn: true, label: "Optional setup", detail: h.config_warnings[0] });
+  }
+
+  if (!items.length) {
+    banner.innerHTML = "";
+    banner.classList.add("hidden");
+    return;
   }
 
   banner.innerHTML = items.map((item) => {
@@ -231,6 +236,12 @@ async function loadHealth(forceRefresh = false) {
       mEl.title = m.connected ? `Connected as ${m.email}` : m.detail || "Microsoft Email not connected";
     }
     await updateMicrosoftUI(m);
+
+    const seamlessBtn = $("btn-seamless-sidebar");
+    if (seamlessBtn) {
+      const showConnect = !!s.can_connect && !s.connected;
+      seamlessBtn.classList.toggle("hidden", !showConnect);
+    }
 
     renderStatusBanner(h);
 
@@ -422,10 +433,11 @@ async function updateGmailUI(g) {
   gEl.classList.add("clickable");
   gEl.onclick = () => {
     const headerBtn = $("btn-gmail-header");
-    if (headerBtn && !headerBtn.classList.contains("disabled")) {
+    if (headerBtn && !headerBtn.classList.contains("disabled") && headerBtn.getAttribute("href")) {
       window.location.href = "/api/gmail/oauth/start";
     } else {
-      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      switchView("settings");
+      card?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   };
 
@@ -666,6 +678,14 @@ async function updateMicrosoftUI(m) {
   }
 
   showMsDisconnectedUI();
+  if (mEl) {
+    mEl.querySelector(".dot").className = "dot bad";
+    mEl.classList.add("clickable");
+    mEl.onclick = () => {
+      switchView("settings");
+      card?.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+  }
 
   if (m.can_connect === false && !m.needs_operator_setup) {
     const headerBtn = $("btn-ms-header");
@@ -713,6 +733,20 @@ function handleMicrosoftOAuthReturn() {
     error: "Microsoft Email connection failed — try again.",
   };
   showToast(msgs[result] || "Microsoft Email connection finished.", result === "connected");
+  history.replaceState({}, "", location.pathname);
+  loadHealth(true);
+}
+
+function handleSeamlessOAuthReturn() {
+  const params = new URLSearchParams(location.search);
+  const result = params.get("seamless");
+  if (!result) return;
+  const msgs = {
+    connected: "Seamless connected — Woodway will use your account credits.",
+    denied: "Seamless connection was cancelled.",
+    error: "Seamless connection failed — check OAuth settings in .env.",
+  };
+  showToast(msgs[result] || "Seamless connection finished.", result === "connected");
   history.replaceState({}, "", location.pathname);
   loadHealth(true);
 }
@@ -808,20 +842,20 @@ const RUN_LABELS = {
   discover: "Discover prospects",
   process_imported: "Process imported",
   contact_search: "Contact search",
+  woodway_pipeline: "Woodway pipeline",
+  keira_pipeline: "Keira pipeline",
 };
 
 function updateContactSearchButton() {
   const btn = $("btn-contacts");
   if (!btn) return;
-  if (currentAgent === "keira" && seamlessConfigured) {
+  if (currentAgent === "woodway") {
+    btn.textContent = "Woodway pipeline";
+    btn.title = "Claude companies → Seamless/web contacts → qualify → Outlook drafts";
+  } else if (currentAgent === "keira" && (seamlessConfigured || actavaConfigured)) {
     const rem = seamlessBudget?.credits_remaining_budget;
-    btn.textContent = rem != null ? `Seamless search (${rem} left)` : "Seamless search";
-    btn.title = `Search free, research up to ${seamlessBudget?.per_run_limit ?? 8} owners per run`;
-  } else if (currentAgent === "keira" && actavaConfigured) {
-    btn.textContent = actavaMode === "agent" ? "Actava agent search" : "Actava prospect search";
-    btn.title = actavaMode === "agent"
-      ? "Run your Actava external agent for owner prospects"
-      : "Web search + Actava Cura extraction (no Seamless)";
+    btn.textContent = rem != null ? `Keira pipeline (${rem} left)` : "Keira pipeline";
+    btn.title = "Company-first gates → Seamless enrich survivors only → confidential drafts";
   } else {
     btn.textContent = "Contact search";
     btn.title = "";
@@ -862,22 +896,72 @@ function renderJobPanel(job, label) {
   }
 }
 
+function extractSeamlessBudgetAlerts(job) {
+  const alerts = [];
+  const seen = new Set();
+  const push = (msg) => {
+    const m = String(msg || "").trim();
+    if (!m || seen.has(m)) return;
+    seen.add(m);
+    alerts.push(m);
+  };
+  for (const entry of job?.log || []) {
+    const msg = entry?.msg || "";
+    if (msg.includes("[SEAMLESS_BUDGET]") || /Seamless research (budget empty|blocked)/i.test(msg)) {
+      push(msg.replace(/^\[SEAMLESS_BUDGET\]\s*/i, "").trim());
+    }
+  }
+  const result = job?.result;
+  if (result && typeof result === "object") {
+    if (result.budget_alert?.message) push(result.budget_alert.message.replace(/^\[SEAMLESS_BUDGET\]\s*/i, "").trim());
+    if (result.budget_alert?.reason) push(result.budget_alert.reason);
+    for (const a of result.alerts || []) {
+      if (a?.message) push(String(a.message).replace(/^\[SEAMLESS_BUDGET\]\s*/i, "").trim());
+      else if (a?.reason) push(a.reason);
+    }
+    const enrichNote = result.steps?.enrich?.people_search?.note || result.steps?.enrich?.note;
+    if (enrichNote && /budget|exhausted|blocked/i.test(enrichNote)) push(enrichNote);
+  }
+  return alerts;
+}
+
 async function pollJob(jobId, label) {
   if (activeJobPoll) clearInterval(activeJobPoll);
   activeJobId = jobId;
+  let budgetToastShown = false;
   return new Promise((resolve) => {
     const tick = async () => {
       try {
         const job = await api(`/api/jobs/${jobId}`);
         renderJobPanel(job, label);
+
+        // Mid-run: toast as soon as Seamless budget exhaustion appears in logs
+        if (!budgetToastShown) {
+          const live = extractSeamlessBudgetAlerts(job);
+          if (live.length) {
+            budgetToastShown = true;
+            showToast(`Seamless budget: ${live[0]}`, false);
+            loadNotifications();
+            loadHealth();
+          }
+        }
+
         if (job.status !== "running") {
           clearInterval(activeJobPoll);
           activeJobPoll = null;
           activeJobId = null;
           setActionButtonsDisabled(false);
+          const budgetAlerts = extractSeamlessBudgetAlerts(job);
           if (job.status === "done") {
-            showToast(job.log?.at(-1)?.msg || "Task complete", true);
-            await Promise.all([loadLeads(), refreshStats(), loadAgents().then(() => renderNav())]);
+            if (budgetAlerts.length) {
+              if (!budgetToastShown) {
+                showToast(`Seamless budget ran out mid-run — ${budgetAlerts[0]}`, false);
+              }
+              await Promise.all([loadNotifications(), loadLeads(), refreshStats(), loadAgents().then(() => renderNav()), loadHealth()]);
+            } else {
+              showToast(job.log?.at(-1)?.msg || "Task complete", true);
+              await Promise.all([loadLeads(), refreshStats(), loadAgents().then(() => renderNav())]);
+            }
           } else if (job.status === "cancelled") {
             showToast("Task cancelled", false);
           } else {
@@ -922,6 +1006,8 @@ async function runAgentAction(mode, { limit } = {}) {
     discover: limit ?? 5,
     process_imported: limit ?? 25,
     contact_search: limit ?? 25,
+    woodway_pipeline: limit ?? 50,
+    keira_pipeline: limit ?? 10,
   };
   setActionButtonsDisabled(true);
   renderJobPanel({ status: "running", log: [{ msg: `Starting ${label.toLowerCase()}…` }] }, label);
@@ -942,7 +1028,15 @@ async function runAgentAction(mode, { limit } = {}) {
 $("btn-requalify")?.addEventListener("click", () => runAgentAction("requalify_all"));
 $("btn-discover")?.addEventListener("click", () => runAgentAction("discover"));
 $("btn-process")?.addEventListener("click", () => runAgentAction("process_imported"));
-$("btn-contacts")?.addEventListener("click", () => runAgentAction("contact_search"));
+$("btn-contacts")?.addEventListener("click", () => {
+  if (currentAgent === "woodway") {
+    runAgentAction("woodway_pipeline");
+  } else if (currentAgent === "keira" && (seamlessConfigured || actavaConfigured)) {
+    runAgentAction("keira_pipeline");
+  } else {
+    runAgentAction("contact_search");
+  }
+});
 
 /* ---------------- automation ---------------- */
 
@@ -1033,7 +1127,77 @@ async function selectAgent(name) {
   renderHeader();
   updateContactSearchButton();
   $("export-btn").href = `/api/agents/${name}/export.csv`;
-  await Promise.all([refreshStats(), loadLeads(), loadPrompts()]);
+  await Promise.all([refreshStats(), loadLeads(), loadPrompts(), loadToday()]);
+}
+
+async function loadToday() {
+  const el = $("today-stats");
+  if (!el || !currentAgent) return;
+  try {
+    const data = await api(`/api/agents/${currentAgent}/today`);
+    const t = data.today || {};
+    const c = data.costs || {};
+    el.innerHTML = `
+      <div class="stat"><div class="stat-value">${t.drafts_to_review || 0}</div><div class="stat-label">Drafts</div></div>
+      <div class="stat"><div class="stat-value">${t.replies_need_review || 0}</div><div class="stat-label">Replies</div></div>
+      <div class="stat"><div class="stat-value">${t.new_signals || 0}</div><div class="stat-label">Signals</div></div>
+      <div class="stat"><div class="stat-value">$${(c.total_cost_usd || 0).toFixed(2)}</div><div class="stat-label">Cost</div></div>`;
+  } catch {
+    el.innerHTML = "";
+  }
+}
+
+async function loadSignals() {
+  const list = $("signals-list");
+  if (!list || !currentAgent) return;
+  try {
+    const data = await api(`/api/agents/${currentAgent}/signals`);
+    list.innerHTML = (data.signals || []).map((s) => `
+      <div class="signal-row">
+        <div><b>${esc(s.label || s.signal_type)}</b> — ${esc(s.company || s.company_domain || "")}</div>
+        <div class="signal-snippet">${esc((s.snippet || "").slice(0, 160))}</div>
+        ${s.source_url ? `<a href="${esc(s.source_url)}" target="_blank" rel="noopener">Source ↗</a>` : ""}
+      </div>`).join("") || "<p class='automation-desc'>No new signals this week.</p>";
+  } catch (e) {
+    list.innerHTML = `<p class='automation-desc'>${esc(e.message)}</p>`;
+  }
+}
+
+function switchView(view) {
+  document.querySelectorAll(".view-tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
+  $("leads-panel")?.classList.toggle("hidden", view !== "leads");
+  $("review-panel")?.classList.toggle("hidden", view !== "review");
+  $("run-panel")?.classList.toggle("hidden", view !== "run");
+  $("settings-panel")?.classList.toggle("hidden", view !== "settings");
+  $("overview-card")?.classList.toggle("hidden", view !== "leads");
+  if (view === "review") loadQaQueue();
+  if (view === "settings") loadSignals();
+}
+
+async function enterReviewMode() {
+  if (!currentAgent) return;
+  reviewQueue = await api(`/api/agents/${currentAgent}/review-queue`);
+  reviewIndex = 0;
+  reviewMode = true;
+  $("btn-review-mode")?.classList.add("active");
+  $("m-review-actions")?.classList.remove("hidden");
+  if (reviewQueue.length) openModal(reviewQueue[0].id);
+  else showToast("Review queue is empty");
+}
+
+async function reviewAction(action) {
+  if (!modalLeadId) return;
+  await api(`/api/leads/${modalLeadId}/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  });
+  await loadLeads();
+  await loadToday();
+  if (reviewMode && reviewQueue.length) {
+    reviewIndex = Math.min(reviewIndex + 1, reviewQueue.length - 1);
+    if (reviewIndex < reviewQueue.length) openModal(reviewQueue[reviewIndex].id);
+  }
 }
 
 function renderHeader() {
@@ -1044,11 +1208,11 @@ function renderHeader() {
   const strip = $("icp-strip");
   const chips = [];
   if (a.industries.length)
-    chips.push(`<span class="chip"><b>Industries:</b> ${esc(a.industries.slice(0, 5).join(", "))}</span>`);
+    chips.push(`<span class="chip"><b>ICP</b> ${esc(a.industries.slice(0, 3).join(", "))}</span>`);
   if (a.titles.length)
-    chips.push(`<span class="chip"><b>Titles:</b> ${esc(a.titles.slice(0, 4).join(", "))}</span>`);
+    chips.push(`<span class="chip">${esc(a.titles.slice(0, 3).join(", "))}</span>`);
   if (a.geography.length)
-    chips.push(`<span class="chip"><b>Geo:</b> ${esc(String(a.geography.slice(0, 2).join(", ")).slice(0, 60))}</span>`);
+    chips.push(`<span class="chip">${esc(String(a.geography.slice(0, 2).join(", ")).slice(0, 48))}</span>`);
   strip.innerHTML = chips.join("");
 }
 
@@ -1057,14 +1221,72 @@ async function refreshStats() {
   renderNav();
   const s = agentData(currentAgent).stats;
   const drafted = s.by_status.drafted || 0;
+  const qualified = s.qualified_ready ?? ((s.by_status.qualified || 0) + drafted);
+  const awaiting = s.awaiting_contact ?? (s.by_status.awaiting_contact || 0);
   $("stats-row").innerHTML = `
     <div class="stat"><div class="stat-value">${s.total}</div><div class="stat-label">Total leads</div></div>
     <div class="stat"><div class="stat-value">${s.with_email}</div><div class="stat-label">With email</div></div>
     <div class="stat"><div class="stat-value">${s.linkedin_only || 0}</div><div class="stat-label">LinkedIn only</div></div>
     <div class="stat"><div class="stat-value">${drafted}</div><div class="stat-label">Outreach drafted</div></div>
-    <div class="stat"><div class="stat-value">${s.by_status.qualified || 0}</div><div class="stat-label">Qualified</div></div>`;
+    <div class="stat"><div class="stat-value">${qualified}</div><div class="stat-label">Qualified + drafted</div></div>
+    <div class="stat"><div class="stat-value">${awaiting}</div><div class="stat-label">Awaiting contact</div></div>`;
   renderFunnel(s);
+  loadQaQueue();
 }
+
+async function loadQaQueue() {
+  const list = $("qa-list");
+  if (!list) return;
+  try {
+    const data = await api(`/api/agents/${currentAgent}/qa-queue?limit=10`);
+    const leads = data.leads || [];
+    if (!leads.length) {
+      list.innerHTML = `<div class="funnel-empty">No drafts awaiting QA</div>`;
+      return;
+    }
+    list.innerHTML = leads.map((l) => `
+      <div class="qa-row" data-id="${l.id}">
+        <div class="qa-main">
+          <strong>${esc(l.company || "")}</strong>
+          <span class="muted">${esc(l.contact_name || "—")} · ${esc(l.email || "no email")} · score ${l.score ?? "—"}</span>
+          <div class="qa-subject">${esc(l.outreach_subject || "(no subject)")}</div>
+        </div>
+        <div class="qa-actions">
+          <button class="btn small primary" data-qa="accept" type="button">Accept</button>
+          <button class="btn small" data-qa="reject" type="button">Reject</button>
+          <button class="btn small ghost" data-open="${l.id}" type="button">Open</button>
+        </div>
+      </div>
+    `).join("");
+    list.querySelectorAll("[data-qa]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const row = btn.closest(".qa-row");
+        const id = row?.dataset.id;
+        if (!id) return;
+        const action = btn.getAttribute("data-qa");
+        let notes = null;
+        if (action === "reject") notes = prompt("Reject reason (optional):") || "";
+        await api(`/api/leads/${id}/qa`, {
+          method: "POST",
+          body: JSON.stringify({ action, notes }),
+        });
+        showToast(action === "accept" ? "QA accepted" : "QA rejected", true);
+        loadQaQueue();
+        loadLeads();
+      });
+    });
+    list.querySelectorAll("[data-open]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = Number(btn.getAttribute("data-open"));
+        if (id) openModal(id);
+      });
+    });
+  } catch (e) {
+    list.innerHTML = `<div class="funnel-empty">QA queue unavailable</div>`;
+  }
+}
+
+$("btn-qa-refresh")?.addEventListener("click", () => loadQaQueue());
 
 function renderFunnel(s) {
   const bar = $("funnel-bar");
@@ -1226,6 +1448,7 @@ async function openModal(id) {
 
   const meta = [];
   if (l.score != null) meta.push(`<span class="chip accent"><b>${l.score}/100</b> ${(l.tier || "").toUpperCase()}</span>`);
+  if (l.contact_tier) meta.push(`<span class="chip">${esc(l.contact_tier_label || l.contact_tier)}</span>`);
   if (l.email) meta.push(`<span class="chip">${esc(l.email)}</span>`);
   else if (l.contact_channel === "linkedin")
     meta.push(`<span class="chip">Email not found · LinkedIn</span>`);
@@ -1238,6 +1461,25 @@ async function openModal(id) {
 
   $("m-signal-wrap").classList.toggle("hidden", !l.signal);
   $("m-signal").textContent = l.signal || "";
+
+  const evidence = l.evidence || [];
+  $("m-evidence-wrap")?.classList.toggle("hidden", !evidence.length);
+  if ($("m-evidence")) {
+    $("m-evidence").innerHTML = evidence.map((e) =>
+      `<li><b>${esc(e.field)}:</b> ${esc(e.value || "")} — <a href="${esc(e.source_url || "#")}" target="_blank" rel="noopener">source</a><br><span class="signal-snippet">${esc((e.snippet || "").slice(0, 120))}</span></li>`
+    ).join("");
+  }
+
+  const steps = l.sequence_steps || [];
+  $("m-sequence-wrap")?.classList.toggle("hidden", !steps.length);
+  if ($("m-sequence")) {
+    $("m-sequence").innerHTML = steps.map((s) =>
+      `<div class="signal-row"><b>Touch ${s.step_number}</b> (${esc(s.channel)}) — ${esc(s.scheduled_for || "")}<pre class="outreach-pre">${esc((s.content || "").slice(0, 400))}</pre></div>`
+    ).join("");
+  }
+
+  $("m-review-actions")?.classList.toggle("hidden", !reviewMode);
+  $("m-actava-dive")?.classList.toggle("hidden", !(l.score >= 70));
 
   let qual = null;
   try { qual = l.qualification_json ? JSON.parse(l.qualification_json) : null; } catch {}
@@ -1257,6 +1499,11 @@ async function openModal(id) {
     ? (l.outreach_subject && !String(l.outreach_body || "").startsWith("Subject")
         ? `Subject: ${l.outreach_subject}\n\n` : "") + (l.outreach_body || "")
     : "";
+
+  const hasLinkedinNote = !!(l.linkedin_note && String(l.linkedin_note).trim());
+  $("m-linkedin-note-wrap")?.classList.toggle("hidden", !hasLinkedinNote);
+  if ($("m-linkedin-note")) $("m-linkedin-note").textContent = l.linkedin_note || "";
+  $("m-linkedin-copy")?.classList.toggle("hidden", !hasLinkedinNote);
 
   renderOutreachGmailActions(l);
 
@@ -1340,10 +1587,11 @@ function renderOutreachGmailActions(l) {
     hideMailBtns();
     linkedinBtn.classList.remove("hidden");
     linkedinBtn.href = normalizeUrl(l.linkedin_url);
+    const noteHint = l.linkedin_note ? " Copy the connection note above and paste it in LinkedIn." : "";
     const hunterHint = l.can_hunter_research
       ? " Email not found — try Hunter above or use LinkedIn for outreach."
       : "";
-    hint.textContent = (l.contact_message || "Email not found — LinkedIn is the best channel for outreach.") + hunterHint;
+    hint.textContent = (l.contact_message || "Email not found — LinkedIn is the best channel for outreach.") + noteHint + hunterHint;
     return;
   }
 
@@ -1432,6 +1680,18 @@ function normalizeUrl(u) {
 $("modal-close").onclick = () => $("modal").classList.add("hidden");
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") $("modal").classList.add("hidden");
+  if (!$("modal") || $("modal").classList.contains("hidden") || !reviewMode) return;
+  if (e.key === "j" || e.key === "J") {
+    reviewIndex = Math.min(reviewIndex + 1, reviewQueue.length - 1);
+    if (reviewQueue[reviewIndex]) openModal(reviewQueue[reviewIndex].id);
+  }
+  if (e.key === "k" || e.key === "K") {
+    reviewIndex = Math.max(reviewIndex - 1, 0);
+    if (reviewQueue[reviewIndex]) openModal(reviewQueue[reviewIndex].id);
+  }
+  if (e.key === "a" || e.key === "A") reviewAction("approve");
+  if (e.key === "x" || e.key === "X") reviewAction("reject");
+  if (e.key === "r" || e.key === "R") reviewAction("regenerate");
 });
 $("modal").onclick = (e) => { if (e.target === $("modal")) $("modal").classList.add("hidden"); };
 $("m-copy").onclick = () => {
@@ -1439,11 +1699,55 @@ $("m-copy").onclick = () => {
   $("m-copy").textContent = "Copied!";
   setTimeout(() => ($("m-copy").textContent = "Copy"), 1500);
 };
+$("m-linkedin-copy")?.addEventListener("click", () => {
+  navigator.clipboard.writeText($("m-linkedin-note").textContent);
+  $("m-linkedin-copy").textContent = "Copied!";
+  setTimeout(() => ($("m-linkedin-copy").textContent = "Copy note"), 1500);
+});
+
+document.querySelectorAll(".view-tab").forEach((tab) => {
+  tab.onclick = () => switchView(tab.dataset.view);
+});
+$("btn-review-mode")?.addEventListener("click", enterReviewMode);
+$("m-approve")?.addEventListener("click", () => reviewAction("approve"));
+$("m-reject")?.addEventListener("click", () => reviewAction("reject"));
+$("m-regen")?.addEventListener("click", () => reviewAction("regenerate"));
+$("m-actava-dive")?.addEventListener("click", async () => {
+  if (!modalLeadId) return;
+  try {
+    await api(`/api/leads/${modalLeadId}/actava-deep-dive`, { method: "POST" });
+    showToast("Actava deep dive complete");
+    openModal(modalLeadId);
+  } catch (e) {
+    showToast(e.message, false);
+  }
+});
+$("btn-load-suppression")?.addEventListener("click", async () => {
+  if (!currentAgent) return;
+  const data = await api(`/api/agents/${currentAgent}/suppression`);
+  $("suppression-list").textContent = JSON.stringify(data.entries || [], null, 2);
+});
 
 $("status-filter").onchange = loadLeads;
 $("search-filter").addEventListener("input", renderLeads);
 
 /* ---------------- prompts ---------------- */
+
+function syncKeiraPromptTabs() {
+  const isKeira = currentAgent === "keira";
+  document.querySelectorAll(".keira-only").forEach((el) => {
+    el.classList.toggle("hidden", !isKeira);
+  });
+  if (!isKeira) {
+    const activeKeira = document.querySelector(".prompts-tab.active[data-tab='analyst'], .prompts-tab.active[data-tab='critic']");
+    if (activeKeira) {
+      document.querySelectorAll(".prompts-tab").forEach((t) => t.classList.remove("active"));
+      document.querySelectorAll(".prompts-panel").forEach((p) => p.classList.remove("active"));
+      document.querySelector('.prompts-tab[data-tab="qualify"]')?.classList.add("active");
+      $("prompts-panel-qualify")?.classList.add("active");
+    }
+  }
+}
 
 async function loadPrompts() {
   if (!currentAgent) return;
@@ -1455,8 +1759,15 @@ async function loadPrompts() {
     $("prompt-qualify-extra").value = p.values.qualify_extra || "";
     $("prompt-outreach-system").value = p.values.outreach_system || "";
     $("prompt-outreach-extra").value = p.values.outreach_extra || "";
+    if ($("prompt-analyst-system")) {
+      $("prompt-analyst-system").value = p.values.analyst_system || "";
+    }
+    if ($("prompt-critic-system")) {
+      $("prompt-critic-system").value = p.values.critic_system || "";
+    }
     $("prompt-qualify-template").textContent = p.templates.qualify_user || "";
     $("prompt-outreach-template").textContent = p.templates.outreach_user || "";
+    syncKeiraPromptTabs();
     updatePromptsSummary(p);
     hidePromptStatus();
   } catch (e) {
@@ -1465,12 +1776,17 @@ async function loadPrompts() {
 }
 
 function promptPayload() {
-  return {
+  const payload = {
     qualify_system: $("prompt-qualify-system").value,
     qualify_extra: $("prompt-qualify-extra").value,
     outreach_system: $("prompt-outreach-system").value,
     outreach_extra: $("prompt-outreach-extra").value,
   };
+  if (currentAgent === "keira") {
+    payload.analyst_system = $("prompt-analyst-system")?.value || "";
+    payload.critic_system = $("prompt-critic-system")?.value || "";
+  }
+  return payload;
 }
 
 function showPromptStatus(msg, isError = false) {
@@ -1489,8 +1805,8 @@ function updatePromptsSummary(p) {
   if (!el) return;
   const custom = Object.values(p.using_defaults || {}).some((v) => !v);
   el.textContent = custom
-    ? "Custom AI instructions saved for this agent."
-    : "Using default AI instructions for qualification and outreach.";
+    ? "Custom Anthropic prompts saved — next run will use them."
+    : "Using default Anthropic prompts. Open Edit prompts to customize.";
 }
 
 $("prompts-toggle")?.addEventListener("click", () => {
@@ -1498,7 +1814,7 @@ $("prompts-toggle")?.addEventListener("click", () => {
   const btn = $("prompts-toggle");
   const expanded = body.classList.toggle("hidden") === false;
   btn.setAttribute("aria-expanded", String(expanded));
-  btn.textContent = expanded ? "Hide advanced settings" : "Advanced settings";
+  btn.textContent = expanded ? "Hide prompts" : "Edit prompts";
 });
 
 document.querySelectorAll(".prompts-tab").forEach((tab) => {
@@ -1541,6 +1857,8 @@ $("prompts-reset").onclick = async () => {
         qualify_extra: "",
         outreach_system: "",
         outreach_extra: "",
+        analyst_system: "",
+        critic_system: "",
       }),
     });
     await loadPrompts();

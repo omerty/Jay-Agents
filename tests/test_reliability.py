@@ -56,6 +56,10 @@ def test_pipeline_outreach_fallback_on_llm_error(monkeypatch, tmp_db):
         "src.pipeline.enrich_company",
         lambda *_a, **_k: {},
     )
+    monkeypatch.setattr(
+        "src.privacy_footprint.fetch_privacy_footprint",
+        lambda *_a, **_k: None,
+    )
 
     def fail_llm(*_a, use_llm=True, **_k):
         from src.llm import LLMError
@@ -68,7 +72,13 @@ def test_pipeline_outreach_fallback_on_llm_error(monkeypatch, tmp_db):
 
     result = process_lead(
         config,
-        {"company": "Acme", "contact_name": "Jane", "source": "imported", "status": "imported"},
+        {
+            "company": "Acme",
+            "contact_name": "Jane Doe",
+            "email": "jane@acme.com",
+            "source": "imported",
+            "status": "imported",
+        },
         agent_name="woodway",
         save=False,
     )

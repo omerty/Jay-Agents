@@ -12,7 +12,6 @@ icp:
     - insurance
     - healthcare
     - data aggregators
-    - technology
   titles:
     - VP Data Governance
     - VP AI Governance
@@ -22,8 +21,61 @@ icp:
     - Head of Data Governance
     - Director of Data Protection
     - Head of Information Governance
+  # Prefer approachable mid-large; megabrands OK — just don't fill the whole run with them
   company_size: large
   geography: global
+  min_employees: 1000
+  # Soft preference only (scoring/digest). Do NOT hard-reject megabrands by headcount.
+  prefer_employees_min: 1500
+  prefer_employees_max: 10000
+
+# Used for discovery/digest diversity (prefer regional peers in the mix). Not a qualify block.
+mega_brand_prefer_peers:
+  - Bank of America
+  - JPMorgan
+  - JPMorgan Chase
+  - Citigroup
+  - Citi
+  - Wells Fargo
+  - Goldman Sachs
+  - Morgan Stanley
+  - Eli Lilly
+  - Pfizer
+  - Novartis
+  - Roche
+  - Johnson & Johnson
+  - UnitedHealth
+  - UnitedHealth Group
+  - Merck
+  - AstraZeneca
+  - Bristol Myers Squibb
+  - Sanofi
+  - Apple
+  - Google
+  - Microsoft
+  - Amazon
+  - Meta
+
+negative_list:
+  names:
+    - OneTrust
+    - BigID
+    - Privitar
+    - IAPP
+    - Epic Systems
+    - Cerner
+    - Oracle Health
+    - Axtria
+    - THG
+    - Carrier
+    - Carrier Global
+    - ERNI
+  patterns:
+    - '\bprivacy tech\b'
+    - '\bsynthetic data vendor\b'
+    - '\bhealth it vendor\b'
+    - '\be-?commerce\b'
+    - '\bhvac\b'
 
 value_props:
   - Quantifies re-identification risk in anonymized datasets
@@ -42,11 +94,14 @@ outreach_tone: professional, consultative, privacy-focused
 prompts:
   qualify_system: "You qualify B2B sales leads for Woodway Assurance (EviData). Output strict JSON only."
   qualify_extra: |
-    Jay sells EviData to large companies in pharma, banking, financial services, insurance,
-    healthcare, data aggregators, and technology. Target VP/Director roles in Data Governance,
-    AI Governance, Privacy, or Data Sharing. Larger companies score higher — a 5,000-person
-    bank is a stronger fit than a 200-person startup. OK to sway slightly for strong governance
-    or privacy signals outside core industries. Penalize roles with no data-sharing exposure.
+    Jay sells EviData to large enterprises in pharma, banking, financial services, insurance,
+    healthcare, and data aggregators. Preferred size is ~1,500–10,000 employees (regional banks,
+    mid-large health systems, specialty pharma, insurers) — but household megabrands with a clear
+    VP/Director Privacy or Data Governance buyer are still good leads; score them on industry +
+    title + signal fit, not brand fame. Soft-tech / SaaS vendors that sell TO these buyers are
+    NOT buyers — score ≤25. Use the FULL 0–100 range: solid ICP fits land 55–75; reserve 80+ for
+    clear industry + title + size/signal. Prefer approachable peers when comparing equals, but
+    do not cap or reject megabrands solely for being large.
   outreach_system: "You write concise, privacy-focused B2B emails for Woodway Assurance. Output the complete email only."
   outreach_extra: |
     Lead with re-identification risk in anonymized data. Reference EviData as a way to give
@@ -55,13 +110,49 @@ prompts:
 research_keywords: '"data governance" OR privacy OR anonymized OR "re-identification" OR "data sharing"'
 
 discover:
-  max_queries: 8
-  results_per_query: 5
-  default_limit: 5
+  max_queries: 20
+  results_per_query: 8
+  default_limit: 50
   search_signals:
     - '"data governance" OR "chief privacy officer" hiring'
     - '"anonymized data" OR de-identification OR "re-identification risk"'
-    - '"director of privacy" OR "head of data governance" large enterprise'
+    - '"director of privacy" OR "head of data governance" regional bank OR "health system"'
+  # Rotated via agent_cursors.discover_query — different slice each run
+  query_pool:
+    - 'regional bank "chief privacy officer" OR "data governance" VP -JPMorgan -Citi -"Bank of America"'
+    - 'pharma OR biotech "chief privacy officer" OR "head of data governance" -Pfizer -Novartis -Roche'
+    - 'insurance "director of privacy" OR "data protection officer" mid-size OR regional'
+    - 'healthcare "information governance" OR "de-identification" "health system"'
+    - '"data aggregator" OR "data broker" privacy governance -Experian'
+    - '"VP data governance" specialty pharma OR biotech hired OR appointed'
+    - '"chief privacy officer" "credit union" OR "community bank" OR "regional bank"'
+    - 'hospital system "data sharing" privacy officer -Kaiser -Mayo'
+    - '"re-identification" OR anonymization "data governance" insurer OR payer'
+    - 'life sciences "data protection officer" OR DPO biotech'
+    - '"AI governance" "director" regional bank OR insurer'
+    - '"secondary use" health data privacy officer "health system"'
+    - '"head of privacy" OR "VP privacy" "mutual insurance" OR "property casualty"'
+    - '"director of data sharing" OR "data partnerships" privacy'
+    - '"privacy counsel" OR "chief privacy" mid-market insurance'
+    - 'biotech "data governance" hiring OR leadership -Pfizer'
+    - '"real world evidence" privacy OR de-identification specialty pharma'
+    - 'payer OR "health plan" "chief privacy officer" -UnitedHealth'
+    - '"asset management" OR "wealth management" data governance -BlackRock'
+    - 'reinsurer privacy OR "data protection" officer'
+    - '"clinical data" anonymization governance biotech'
+    - 'site:linkedin.com/in "chief privacy officer" "regional bank"'
+    - 'site:linkedin.com/in "VP data governance" insurance -MetLife'
+    - '"new chief privacy officer" OR "appoints" "privacy officer" hospital'
+    - '"joins as" "head of data governance" OR "director of privacy" insurer'
+    - '"privacy impact assessment" director "health system"'
+    - 'anonymized dataset sharing partnership specialty pharma'
+    - '"information governance" hospital OR "health system" -Epic'
+    - 'payments OR fintech bank "chief privacy officer" -PayPal'
+    - '"life insurance" "data governance" OR privacy director'
+    - 'oncology OR "rare disease" data sharing privacy biotech'
+    - '"pharmacy benefit" privacy OR de-identification -CVS'
+    - '"customer data platform" governance regional bank OR insurer -vendor'
+    - '"open banking" data protection officer regional'
 
 apollo:
   person_titles:
@@ -79,7 +170,37 @@ apollo:
   employee_ranges:
     - "1001,5000"
     - "5001,10000"
-    - "10001,50000"
+    # Cap below mega-enterprise — approachable band only
+    # (omit 10001,50000)
+
+# Actava → company discovery (Woodway pipeline step 1)
+actava:
+  mode: companies
+  max_queries: 20
+  results_per_query: 8
+  # Optional override for external Actava agent runs:
+  # prospect_prompt: |
+  #   Find {limit} large enterprises that share or anonymize sensitive data...
+
+# Seamless → people at those companies (Woodway pipeline step 3)
+seamless:
+  job_title:
+    - VP Data Governance
+    - Director of Data Governance
+    - Head of Data Governance
+    - Chief Privacy Officer
+    - Director of Privacy
+    - VP AI Governance
+    - Director of Data Protection
+    - Head of Information Governance
+  seniority:
+    - VP
+    - Director
+    - C-Level
+  company_size:
+    - 1,001 - 5,000
+    - 5,001 - 10,000
+    # Prefer approachable enterprise; omit open-ended 10,001+ megabrands
 
 pdl:
   job_title_keywords:
@@ -94,7 +215,7 @@ pdl:
   job_company_sizes:
     - "1001-5000"
     - "5001-10000"
-    - "10001+"
+    # omit 10001+ — approachable band only
   job_title_levels:
     - director
     - vp

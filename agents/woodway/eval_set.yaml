@@ -1,0 +1,58 @@
+# Holdout drafts for offline outreach eval.
+# expect: good = should score high; bad = should score low / fail gates.
+# Run: python -m src.outreach_eval --agent woodway
+
+drafts:
+  - id: good_signal_specific
+    expect: good
+    subject: re-id risk on shared cohorts
+    context: |
+      TRIGGER: Pfizer announced expanded real-world evidence data-sharing partnership.
+      Privacy policy mentions de-identification for secondary use.
+    body: |
+      Subject: re-id risk on shared cohorts
+
+      Hi Sarah,
+
+      Pfizer's recent RWE data-sharing work makes re-identification risk on anonymized cohorts a live governance question — not a theoretical one.
+
+      EviData quantifies that risk so Data Governance can show defensible metrics in leadership and compliance reviews.
+
+      Worth a 15-minute look at how you evidence expert determination today?
+
+      Best,
+      Jay Swayze
+      Woodway Assurance
+
+  - id: bad_generic_fluent
+    expect: bad
+    subject: exciting opportunity to revolutionize your privacy
+    context: |
+      Company: Some Bank
+    body: |
+      Subject: exciting opportunity to revolutionize your privacy
+
+      Hi there,
+
+      I hope this finds you well! I came across your company and was impressed by your cutting-edge commitment to seamlessly unlocking the power of data while empowering stakeholders across the enterprise.
+
+      We would love to schedule a call to discuss how we can help you leverage robust solutions.
+
+      Looking forward to connecting!
+      Best
+
+  - id: bad_unsupported_roi
+    expect: bad
+    subject: 40% faster privacy reviews
+    context: Acme Health System
+    body: |
+      Subject: 40% faster privacy reviews
+
+      Hi Jordan,
+
+      Our customers typically see 40% faster privacy review cycles and regulatory approval within weeks after deploying EviData with Fortune 500 pharma logos you already know.
+
+      Can I send a calendar link?
+
+      Best
+      Jay

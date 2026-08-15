@@ -38,7 +38,12 @@ class SeamlessMcpClient:
         self._rpc_id = 0
 
     def _headers(self) -> dict:
-        return {"Token": self.api_key, "Content-Type": "application/json"}
+        # Seamless MCP requires both Accept types (HTTP 406 otherwise)
+        return {
+            "Token": self.api_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
 
     def _next_id(self) -> int:
         self._rpc_id += 1
@@ -152,7 +157,7 @@ class SeamlessMcpClient:
         if next_token:
             args["nextToken"] = next_token
         payload = self._call_tool("search_contacts", args, timeout=60.0)
-        return payload if isinstance(payload, dict) else {"data": payload}
+        return self._normalize_search_payload(payload)
 
     def search_companies(self, filters: dict, *, limit: int = 50, next_token: str | None = None) -> dict:
         args = {k: v for k, v in filters.items() if k != "limit"}
@@ -160,7 +165,26 @@ class SeamlessMcpClient:
         if next_token:
             args["nextToken"] = next_token
         payload = self._call_tool("search_companies", args, timeout=60.0)
-        return payload if isinstance(payload, dict) else {"data": payload}
+        return self._normalize_search_payload(payload)
+
+    @staticmethod
+    def _normalize_search_payload(payload: dict | list) -> dict:
+        """Map MCP `results` shape onto REST-compatible `{data: [...]}`."""
+        if isinstance(payload, list):
+            return {"data": payload}
+        if not isinstance(payload, dict):
+            return {"data": []}
+        if payload.get("data") is not None:
+            return payload
+        if payload.get("results") is not None:
+            out = dict(payload)
+            out["data"] = out.pop("results")
+            # Map pagination next token if present
+            pag = out.get("pagination") or {}
+            if isinstance(pag, dict) and pag.get("nextToken") and "nextToken" not in out:
+                out["nextToken"] = pag["nextToken"]
+            return out
+        return payload
 
     def research_contacts(self, search_result_ids: list[str]) -> list[str]:
         if not search_result_ids:

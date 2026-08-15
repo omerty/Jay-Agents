@@ -73,7 +73,11 @@ def _request(method: str, url: str, **kwargs) -> dict | list:
     if r.status_code == 403:
         raise ActavaError("Actava access denied — check org permissions (403)", 403)
     if r.status_code == 404:
-        raise ActavaError("Actava agent or endpoint not found (404)", 404)
+        detail = r.text[:300].strip()
+        msg = "Actava agent or endpoint not found (404)"
+        if detail:
+            msg = f"{msg}: {detail}"
+        raise ActavaError(msg, 404)
     if r.status_code == 429:
         raise ActavaError("Actava rate limit exceeded (429)", 429)
     if r.status_code >= 400:

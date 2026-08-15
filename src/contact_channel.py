@@ -60,10 +60,14 @@ def contact_channel_info(lead: dict) -> dict:
 
 def enrich_lead(lead: dict) -> dict:
     """Attach contact_channel fields to a lead dict for API responses."""
+    from .contact_tier import classify_contact_tier, tier_label
     from .hunter_api import hunter_available
 
     info = contact_channel_info(lead)
     out = dict(lead)
+    tier = (lead.get("contact_tier") or classify_contact_tier(lead)).upper()
+    out["contact_tier"] = tier
+    out["contact_tier_label"] = tier_label(tier)
     out["contact_channel"] = info["channel"]
     out["contact_label"] = info["label"]
     out["contact_message"] = info["message"]
@@ -73,4 +77,6 @@ def enrich_lead(lead: dict) -> dict:
         and not _has_email(lead)
         and _has_contact_name(lead)
     )
+    if tier == "B" or lead.get("email_inferred"):
+        out["contact_message"] = "Inferred email — verify before send."
     return out

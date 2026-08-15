@@ -73,8 +73,8 @@ def test_qualify_extra_appears_in_llm_prompt(monkeypatch):
     config["prompts"]["qualify_extra"] = "ONLY score pharmaceutical companies above 90."
     qualify_prospect(config, "VP Privacy at Acme", use_llm=True, fallback=False)
 
-    assert "ONLY score pharmaceutical companies above 90." in captured["prompt"]
-    assert "CUSTOM INSTRUCTIONS" in captured["prompt"]
+    assert "ONLY score pharmaceutical companies above 90." in captured["system"]
+    assert "SCORING NOTES" in captured["system"]
     assert "Woodway Assurance" in captured["system"]
 
 
@@ -83,6 +83,7 @@ def test_outreach_extra_appears_in_llm_prompt(monkeypatch):
 
     def fake_chat(prompt, system=None, **kwargs):
         captured["prompt"] = prompt
+        captured["system"] = system
         return "Subject: Hi\n\nHi there,\n\nTest.\n\nBest,\nJay\nCo"
 
     monkeypatch.setattr("src.llm.chat", fake_chat)
@@ -98,8 +99,8 @@ def test_outreach_extra_appears_in_llm_prompt(monkeypatch):
         use_llm=True,
     )
 
-    assert "Always mention DWDM upgrades" in captured["prompt"]
-    assert "CUSTOM OUTREACH INSTRUCTIONS" in captured["prompt"]
+    assert "Always mention DWDM upgrades" in captured["system"]
+    assert "OUTREACH NOTES" in captured["system"]
 
 
 def test_prompts_yaml_overrides_config(monkeypatch, tmp_path):
@@ -128,6 +129,32 @@ def test_size_score_boost():
     assert size_score_boost(100) == 0
 
 
+def test_woodway_size_score_boost_prefers_approachable_band():
+    from src.enrich import woodway_size_score_boost
+
+    assert woodway_size_score_boost(4000) == 15  # sweet spot
+    assert woodway_size_score_boost(8000) == 15
+    assert woodway_size_score_boost(1200) == 8  # above min, below prefer
+    assert woodway_size_score_boost(12000) == 5  # above prefer — still OK
+    assert woodway_size_score_boost(50000) == 5  # megabrand size — not blocked
+    assert woodway_size_score_boost(200) == -10  # too small
+
+
+def test_mega_brand_helpers():
+    from src.enrich import is_mega_brand, mega_brand_demote_penalty
+
+    cfg = {
+        "mega_brand_prefer_peers": ["Bank of America", "Citi", "Eli Lilly"],
+    }
+    assert is_mega_brand("Bank of America", cfg) is True
+    assert is_mega_brand("Eli Lilly and Company", cfg) is True
+    # Must not match Citizens just because "Citi" is listed
+    assert is_mega_brand("Citizens Financial Group", cfg) is False
+    assert is_mega_brand("Regions Bank", cfg) is False
+    # Demote is intentionally disabled — mix via discovery, don't score-kill
+    assert mega_brand_demote_penalty("Bank of America", cfg) == 0
+
+
 def test_keira_size_score_boost():
     assert keira_size_score_boost(200) == 15
     assert keira_size_score_boost(8000) == -15
@@ -135,7 +162,28 @@ def test_keira_size_score_boost():
 
 
 def test_agent_size_score_boost_routes_by_icp():
+    from src.agent import load_agent
+
     woodway = load_agent("woodway")
     keira = load_agent("keira")
+    # Woodway: approachable band boost; megas still get a small positive size nudge
     assert agent_size_score_boost(5000, woodway) == 15
+    assert agent_size_score_boost(50000, woodway) == 5
     assert agent_size_score_boost(6000, keira) == -15
+
+
+def test_woodway_does_not_hard_reject_megabrand_headcount():
+    from src.icp_gates import max_employees, passes_icp_gates
+    from src.agent import load_agent
+
+    cfg = load_agent("woodway")
+    assert max_employees(cfg) is None  # soft preference only
+    ok_small, reason_small = passes_icp_gates(
+        "Tiny Startup LLC", cfg, agent="woodway", employee_count=200, domain=None,
+    )
+    assert ok_small is False
+    assert "below" in (reason_small or "")
+    ok_mega, _reason_mega = passes_icp_gates(
+        "Giant Bank Corp", cfg, agent="woodway", employee_count=80000, domain=None,
+    )
+    assert ok_mega is True  # megabrands allowed through the gate
