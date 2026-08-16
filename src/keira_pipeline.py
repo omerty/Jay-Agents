@@ -296,10 +296,12 @@ def run_keira_pipeline(
             discovery_meta["sources"]["anthropic_web"] = {"error": str(e)}
 
     # Prefer Actava-sourced rows first for gate/budget ordering
+    from .keira_intelligence import safe_int
+
     discovered.sort(
         key=lambda r: (
             0 if str(r.get("source") or "").startswith("actava") else 1,
-            -(int(r.get("score") or 0)),
+            -safe_int(r.get("score"), 0),
         )
     )
 

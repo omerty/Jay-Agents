@@ -241,6 +241,8 @@ def _lead_record(raw: dict, config: dict) -> dict | None:
     linkedin = (raw.get("linkedin_url") or raw.get("liUrl") or "").strip() or None
 
     emp = raw.get("employee_count")
+    if isinstance(emp, dict):
+        emp = emp.get("value")
     if emp is not None and not isinstance(emp, int):
         try:
             emp = int(re.sub(r"[^\d]", "", str(emp))) or None
@@ -249,6 +251,8 @@ def _lead_record(raw: dict, config: dict) -> dict | None:
 
     signal = _enrich_signal_from_actava(raw)
     score = raw.get("total_score") or raw.get("score")
+    if isinstance(score, dict):
+        score = score.get("value")
     try:
         score = int(score) if score is not None else None
     except (TypeError, ValueError):

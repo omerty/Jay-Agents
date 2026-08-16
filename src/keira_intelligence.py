@@ -18,8 +18,16 @@ logger = logging.getLogger(__name__)
 def _coerce_employees(val: Any) -> int | None:
     if val is None:
         return None
+    if isinstance(val, dict):
+        val = val.get("value")
+    if val is None or val == "":
+        return None
+    if isinstance(val, bool):
+        return None
     if isinstance(val, int):
         return val
+    if isinstance(val, float):
+        return int(val)
     m = re.search(r"(\d[\d,]*)", str(val))
     if not m:
         return None
@@ -27,6 +35,27 @@ def _coerce_employees(val: Any) -> int | None:
         return int(m.group(1).replace(",", ""))
     except ValueError:
         return None
+
+
+def safe_int(val: Any, default: int = 0) -> int:
+    """Coerce score/counts that may arrive as evidence dicts or strings."""
+    if val is None or val == "":
+        return default
+    if isinstance(val, dict):
+        return safe_int(val.get("value"), default)
+    if isinstance(val, bool):
+        return int(val)
+    if isinstance(val, int):
+        return val
+    if isinstance(val, float):
+        return int(val)
+    m = re.search(r"-?\d+", str(val).replace(",", ""))
+    if not m:
+        return default
+    try:
+        return int(m.group(0))
+    except ValueError:
+        return default
 
 
 def _founded_year(text: str) -> int | None:
