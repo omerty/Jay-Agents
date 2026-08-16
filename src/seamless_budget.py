@@ -7,6 +7,9 @@ Hard stops before spend:
   - per-agent daily cap (SEAMLESS_DAILY_BUDGET_WOODWAY / _KEIRA)
   - shared daily + monthly budgets
   - optional API remaining reserve floor
+
+Set SEAMLESS_CAPS_DISABLED=true to skip all credit caps (Keira/Woodway manual runs).
+Usage is still recorded; only the spend clamps are lifted.
 """
 
 from __future__ import annotations
@@ -24,6 +27,15 @@ _BUDGET_NOTIFY_KEYS: set[str] = set()
 
 # Stable marker for UI job-log scanning
 BUDGET_ALERT_MARKER = "[SEAMLESS_BUDGET]"
+
+# High ceiling when caps are disabled (still bounds runaway allocate calls)
+_UNCAPPED_LIMIT = 100_000
+
+
+def caps_disabled() -> bool:
+    """When true, allocate_research_slots does not clamp (manual runs only)."""
+    raw = (os.getenv("SEAMLESS_CAPS_DISABLED") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
 
 
 def format_budget_alert_message(reason: str, *, agent: str = "keira") -> str:
@@ -180,6 +192,8 @@ def daily_hard_cap() -> int:
 
 
 def max_research_per_run(agent: str = "keira") -> int:
+    if caps_disabled():
+        return _UNCAPPED_LIMIT
     if agent == "keira":
         return int(
             os.getenv("SEAMLESS_KEIRA_RESEARCH_LIMIT")
@@ -410,6 +424,15 @@ def allocate_research_slots(
         return 0, "nothing requested"
     if not research_enabled():
         return 0, "Seamless research disabled (SEAMLESS_RESEARCH_ENABLED=false)"
+    if caps_disabled():
+        allowed = min(requested, _UNCAPPED_LIMIT)
+        if api_remaining is not None:
+            allowed = min(allowed, max(0, api_remaining - min_api_reserve()))
+        if allowed <= 0:
+            return 0, "Seamless API remaining below reserve (caps disabled otherwise)"
+        if allowed < requested:
+            return allowed, f"capped to {allowed} by API reserve only (requested {requested})"
+        return allowed, "caps disabled (SEAMLESS_CAPS_DISABLED)"
 
     status = budget_status(api_remaining, agent=agent)
     _maybe_soft_alert(status, agent=agent)

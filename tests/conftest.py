@@ -14,6 +14,10 @@ def woodway_test_defaults(monkeypatch):
     monkeypatch.setenv("ACCOUNT_BRIEFS_ENABLED", "false")
     monkeypatch.setenv("ACCOUNT_BRIEF_FILINGS", "false")
     monkeypatch.setenv("EMAIL_VERIFY_BEFORE_DRAFT", "false")
+    # Local .env may set SEAMLESS_CAPS_DISABLED=true; keep budget tests deterministic
+    monkeypatch.setenv("SEAMLESS_CAPS_DISABLED", "false")
+    monkeypatch.setenv("DAILY_RUN_WOODWAY", "false")
+    monkeypatch.setenv("DAILY_RUN_KEIRA", "false")
 
 
 @pytest.fixture()

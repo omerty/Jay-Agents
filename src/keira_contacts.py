@@ -54,7 +54,7 @@ def discover_keira_contacts(
         # Seamless research returns emails — skip pattern/Hunter pre-steps
         from .seamless import max_contacts_per_company, search_and_import_seamless_for_companies
 
-        # Request the critic-approved queue size; allocate_research_slots applies
+        # Request full company list; allocate_research_slots applies
         # per-run cap + small overage. Do not pre-clamp to SEAMLESS_KEIRA_RESEARCH_LIMIT.
         research_n = min(
             max(len(names) * max_contacts_per_company(agent), len(names), 1),

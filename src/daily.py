@@ -6,7 +6,9 @@ For each agent:
   3. Create Gmail drafts for hot/warm leads with emails (drafts only — never sends)
 Then scan Gmail for replies to previously sent outreach and notify.
 
-Install the cron job with:  ./scripts/setup_cron.sh
+Install cron only if forced: FORCE_CRON_INSTALL=1 ./scripts/setup_cron.sh
+Remove cron with:          ./scripts/remove_cron.sh
+Woodway/Keira stay off unless DAILY_RUN_WOODWAY / DAILY_RUN_KEIRA are true.
 Run manually with:          python -m src.daily
 """
 
@@ -22,7 +24,27 @@ from .db import create_notification, record_run
 
 logger = logging.getLogger("daily")
 
-AGENTS = ["woodway", "fonex", "keira"]
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
+# Woodway + Keira default OFF — manual pipeline only until cron is re-enabled.
+def _daily_agents() -> list[str]:
+    agents: list[str] = []
+    if _env_bool("DAILY_RUN_WOODWAY", False):
+        agents.append("woodway")
+    if _env_bool("DAILY_RUN_FONEX", True):
+        agents.append("fonex")
+    if _env_bool("DAILY_RUN_KEIRA", False):
+        agents.append("keira")
+    return agents
+
+
+AGENTS = ["woodway", "fonex", "keira"]  # full set; run_daily uses _daily_agents()
 
 CONTACT_LIMIT = int(os.getenv("DAILY_CONTACT_LIMIT", "50"))
 PROCESS_LIMIT = int(os.getenv("DAILY_PROCESS_LIMIT", "50"))
@@ -60,7 +82,18 @@ def run_daily() -> dict:
         create_notification(f"Daily run skipped — {summary}")
         return {"ok": False, "summary": summary, "config": cfg}
 
-    for agent in AGENTS:
+    agents = _daily_agents()
+    if not agents:
+        summary = (
+            "No agents enabled for daily auto-run "
+            "(DAILY_RUN_WOODWAY / DAILY_RUN_KEIRA default off; set true to re-enable)"
+        )
+        logger.warning(summary)
+        record_run("daily", ok=True, summary=summary, started_at=started)
+        return {"ok": True, "summary": summary, "skipped": True, "agents": []}
+
+    logger.info("Daily agents: %s", ", ".join(agents))
+    for agent in agents:
         agent_summary = []
 
         # Woodway: full company→people→draft pipeline (Anthropic or Actava)

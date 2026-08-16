@@ -359,11 +359,27 @@ def test_seamless_client_raises_without_key():
 
 
 def test_max_research_per_run_keira(monkeypatch):
+    monkeypatch.setenv("SEAMLESS_CAPS_DISABLED", "false")
     monkeypatch.setenv("SEAMLESS_KEIRA_RESEARCH_LIMIT", "8")
     assert max_research_per_run("keira") == 8
 
 
+def test_caps_disabled_skips_budget_clamps(tmp_db, monkeypatch):
+    monkeypatch.setenv("SEAMLESS_CAPS_DISABLED", "true")
+    monkeypatch.setenv("SEAMLESS_RESEARCH_ENABLED", "true")
+    monkeypatch.setenv("SEAMLESS_DAILY_BUDGET", "1")
+    monkeypatch.setenv("SEAMLESS_KEIRA_RESEARCH_LIMIT", "1")
+    from src.seamless_budget import allocate_research_slots, caps_disabled, max_research_per_run
+
+    assert caps_disabled()
+    assert max_research_per_run("keira") >= 1000
+    n, note = allocate_research_slots(80, agent="keira")
+    assert n == 80
+    assert "caps disabled" in note.lower()
+
+
 def test_max_research_per_run_woodway_default_50(monkeypatch):
+    monkeypatch.setenv("SEAMLESS_CAPS_DISABLED", "false")
     monkeypatch.delenv("SEAMLESS_WOODWAY_RESEARCH_LIMIT", raising=False)
     assert max_research_per_run("woodway") == 50
 

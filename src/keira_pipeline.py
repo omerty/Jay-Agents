@@ -5,8 +5,8 @@ Flow:
   2. Cheap gates: geo / ownership / owner / size / succession tiers
   3. Budget allocate by ICP fit × timing × confidence
   4. Claude research analyst (top N) → re-qualify
-  5. Two-tier critic: soft enrich (tier≥1) vs hard draft (tier≥2)
-  6. Seamless research ONLY for enrich-approved survivors
+  5. Critic gates drafts only (hard reject still skips)
+  6. Seamless contact research for ALL non-rejected gate survivors
   7. Process → mailbox drafts only for draft-approved (human send)
 """
 
@@ -109,16 +109,19 @@ def _keira_caps(config: dict, limit: int) -> tuple[int, int, str | None]:
         or research.get("max_claude_research")
         or min(limit, 8)
     )
-    seamless_cap = int(
-        os.getenv("KEIRA_SEAMLESS_ENRICH_CAP")
-        or research.get("max_seamless_credits")
-        or min(limit, 5)
-    )
-    budget_note: str | None = None
-    # Never exceed live Seamless budget guards
-    try:
-        from .seamless_budget import allocate_research_slots
+    from .seamless_budget import allocate_research_slots, caps_disabled, max_research_per_run
 
+    if caps_disabled():
+        seamless_cap = max(limit * 20, max_research_per_run("keira"), 500)
+    else:
+        seamless_cap = int(
+            os.getenv("KEIRA_SEAMLESS_ENRICH_CAP")
+            or research.get("max_seamless_credits")
+            or min(limit, 5)
+        )
+    budget_note: str | None = None
+    # Never exceed live Seamless budget guards (no-op when SEAMLESS_CAPS_DISABLED)
+    try:
         allowed, note = allocate_research_slots(seamless_cap, agent="keira")
         if allowed <= 0:
             budget_note = note or "no Seamless research budget remaining"
@@ -524,8 +527,8 @@ def run_keira_pipeline(
         "errors": analyst_errors,
     }
 
-    # ---- 5. Critic gate (soft enrich vs hard draft) ----
-    emit("Step 5/7 — Critic gate before Seamless credits…")
+    # ---- 5. Critic gate (drafts only; Seamless is not gated here) ----
+    emit("Step 5/7 — Critic gate (drafts); Seamless contacts all non-rejected…")
     enrich_min_tier = int(
         os.getenv("KEIRA_ENRICH_MIN_TIER")
         or research_cfg.get("enrich_min_succession_tier")
@@ -536,7 +539,7 @@ def run_keira_pipeline(
         or research_cfg.get("draft_min_succession_tier")
         or 2
     )
-    approved: list[dict] = []  # approved_for_enrich
+    approved: list[dict] = []  # critic enrich-ok (stats / memory only)
     draft_approved_companies: set[str] = set()
     critic_reject = 0
     research_hold = 0
@@ -598,9 +601,9 @@ def run_keira_pipeline(
                 research_priority=0,
             )
         else:
-            # Soft hold: research_further / research_required — no Seamless yet
+            # Soft hold: still eligible for Seamless contacts; drafts stay blocked
             rec = {k: v for k, v in row.items() if not str(k).startswith("_")}
-            rec["status"] = "imported"  # research later — no Seamless yet
+            rec["status"] = "imported"
             upsert_lead(rec, agent=agent)
             research_hold += 1
             remember_research(
@@ -611,33 +614,58 @@ def run_keira_pipeline(
                 research_priority=int((row.get("_priority") or {}).get("research_priority") or 0),
             )
 
-    # Rank approved by research_priority for credit spend
-    approved.sort(
+    # Seamless for every non-rejected gate survivor (analyzed + Claude-deferred).
+    # Critic still controls drafts only.
+    seamless_pool: list[dict] = []
+    seen_seamless: set[str] = set()
+
+    def _eligible_for_seamless(row: dict) -> bool:
+        co = (row.get("company") or "").strip()
+        key = co.lower()
+        if not co or key in seen_seamless:
+            return False
+        if (row.get("_qual") or {}).get("rejected"):
+            return False
+        critic = row.get("_critic") or {}
+        if critic.get("hard_reject") or critic.get("recommendation") == "reject":
+            return False
+        return True
+
+    for row in analyzed:
+        if _eligible_for_seamless(row):
+            seen_seamless.add((row.get("company") or "").strip().lower())
+            seamless_pool.append(row)
+    for row in survivors:
+        if _eligible_for_seamless(row):
+            seen_seamless.add((row.get("company") or "").strip().lower())
+            seamless_pool.append(row)
+
+    seamless_pool.sort(
         key=lambda r: (r.get("_priority") or {}).get("research_priority") or r.get("score") or 0,
         reverse=True,
     )
     if seamless_cap > 0:
-        to_enrich = approved[:seamless_cap]
+        to_enrich = seamless_pool[:seamless_cap]
         contact_force_web = False
-    elif approved and not _research_budget_dead(budget_note):
+    elif seamless_pool and not _research_budget_dead(budget_note):
         # Per-run clamp hit — keep Seamless; allocate_research_slots may grant run overage
-        to_enrich = approved[: min(len(approved), 20)]
+        to_enrich = seamless_pool[: min(len(seamless_pool), 20)]
         contact_force_web = False
         emit(
             f"Per-run Seamless cap empty — still trying Seamless for {len(to_enrich)} "
-            "critic-approved (run overage / remaining daily)"
+            "leads (run overage / remaining daily)"
         )
     else:
         # Credits truly exhausted (disabled / monthly / daily hard cap) — free web fallback
-        to_enrich = approved[: min(3, len(approved))]
+        to_enrich = seamless_pool[: min(3, len(seamless_pool))]
         contact_force_web = bool(to_enrich)
-        if approved:
+        if seamless_pool:
             from .seamless_budget import format_budget_alert_message, notify_seamless_budget_exhausted
 
             alert = notify_seamless_budget_exhausted(
                 budget_note or "Seamless research budget exhausted mid-run",
                 agent=agent,
-                context=f"{len(approved)} critic-approved waiting for contacts",
+                context=f"{len(seamless_pool)} leads waiting for contacts",
             )
             summary.setdefault("alerts", []).append(alert)
             summary["budget_alert"] = alert
@@ -645,7 +673,7 @@ def run_keira_pipeline(
         if contact_force_web:
             emit(
                 "Seamless research budget empty — web contact fallback for "
-                f"{len(to_enrich)} critic-approved companies"
+                f"{len(to_enrich)} of {len(seamless_pool)} leads"
             )
 
     summary["steps"]["critic"] = {
@@ -654,6 +682,7 @@ def run_keira_pipeline(
         "approved_for_draft": len(draft_approved_companies),
         "soft_enrich_only": soft_enrich_only,
         "enrich_queue": len(to_enrich),
+        "seamless_pool": len(seamless_pool),
         "enrich_min_tier": enrich_min_tier,
         "draft_min_tier": draft_min_tier,
         "rejected": critic_reject,
@@ -662,34 +691,25 @@ def run_keira_pipeline(
     }
     emit(
         f"Critic — {len(approved)} enrich-ok ({soft_enrich_only} soft), "
-        f"{len(draft_approved_companies)} draft-ok, enriching {len(to_enrich)}, "
-        f"{critic_reject} rejected, {research_hold} hold"
+        f"{len(draft_approved_companies)} draft-ok; Seamless pool {len(seamless_pool)} "
+        f"(capped {len(to_enrich)}), {critic_reject} rejected, {research_hold} hold"
     )
 
     for row in to_enrich:
         upsert_lead({k: v for k, v in row.items() if not str(k).startswith("_")}, agent=agent)
 
-    # ---- 6. Contact discovery (Seamless-first when configured) ----
+    # ---- 6. Contact discovery (Seamless for all non-rejected leads) ----
     from .keira_contacts import (
-        companies_needing_keira_contacts,
         discover_keira_contacts,
         keira_contact_discovery_mode,
     )
 
     contact_mode = "web" if contact_force_web else keira_contact_discovery_mode()
-    emit(f"Step 6/7 — Finding contacts ({contact_mode})…")
+    emit(f"Step 6/7 — Finding contacts via {contact_mode} for {len(to_enrich)} leads…")
 
-    # HARD GATE: paid/Seamless contact spend only for critic-approved enrich queue.
     company_names = list(dict.fromkeys(
         [r["company"] for r in to_enrich if r.get("company")]
     ))
-    if not company_names:
-        needing = companies_needing_keira_contacts(agent, limit=5)
-        if needing:
-            emit(
-                f"Skipping contact spend for {len(needing)} awaiting companies "
-                f"(not critic-approved this run)"
-            )
 
     enrich_step: dict = {"enriched": 0, "skipped": True}
     if company_names:

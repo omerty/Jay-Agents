@@ -390,8 +390,14 @@ def automation():
     scan = last_run("reply_scan")
     hour = int(os.getenv("DAILY_CRON_HOUR", "0"))
     return {
-        "schedule": f"daily at {hour:02d}:00 local time via cron (scripts/setup_cron.sh)",
+        "schedule": (
+            "manual only — Woodway/Keira auto-run off "
+            "(DAILY_RUN_WOODWAY / DAILY_RUN_KEIRA default false; "
+            "remove cron with scripts/remove_cron.sh)"
+        ),
         "cron_hour": hour,
+        "daily_run_woodway": os.getenv("DAILY_RUN_WOODWAY", "false"),
+        "daily_run_keira": os.getenv("DAILY_RUN_KEIRA", "false"),
         "last_daily_run": daily,
         "last_reply_scan": scan,
     }

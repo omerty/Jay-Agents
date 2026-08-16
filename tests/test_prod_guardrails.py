@@ -137,15 +137,39 @@ def test_resolve_awaiting_shells(tmp_db):
     assert any(r["status"] == "skipped" for r in get_leads(agent="woodway") if not r.get("contact_name"))
 
 
-def test_critic_approved_only_companies_for_seamless():
-    """Contract: Step 6 company list is critic enrich queue only — never needs-contact bypass."""
-    approved = [{"company": "Good Co"}, {"company": "Also Good"}]
-    to_enrich = approved[:2]
-    needing = ["Bad Broker", "Random Shell"]
-    # Prod code must NOT union needing into Seamless targets
-    company_names = list(dict.fromkeys([r["company"] for r in to_enrich if r.get("company")]))
-    assert company_names == ["Good Co", "Also Good"]
-    assert not any(n in company_names for n in needing)
+def test_keira_seamless_covers_all_non_rejected_leads():
+    """Contract: Keira Seamless pool is gate survivors minus hard rejects — not critic enrich-only."""
+    analyzed = [
+        {"company": "Soft Hold Co", "_qual": {}, "_critic": {"recommendation": "research_required"}},
+        {"company": "Draft Ok Co", "_qual": {}, "_critic": {"approved_for_enrich": True, "approved": True}},
+        {"company": "Rejected Co", "_qual": {}, "_critic": {"recommendation": "reject", "hard_reject": True}},
+    ]
+    survivors = analyzed + [
+        {"company": "Deferred Co", "_qual": {}},  # Claude-deferred, still needs contacts
+    ]
+    seamless_pool: list[dict] = []
+    seen: set[str] = set()
+
+    def eligible(row: dict) -> bool:
+        co = (row.get("company") or "").strip()
+        key = co.lower()
+        if not co or key in seen:
+            return False
+        if (row.get("_qual") or {}).get("rejected"):
+            return False
+        critic = row.get("_critic") or {}
+        if critic.get("hard_reject") or critic.get("recommendation") == "reject":
+            return False
+        return True
+
+    for row in analyzed + survivors:
+        if eligible(row):
+            seen.add((row.get("company") or "").strip().lower())
+            seamless_pool.append(row)
+
+    names = [r["company"] for r in seamless_pool]
+    assert names == ["Soft Hold Co", "Draft Ok Co", "Deferred Co"]
+    assert "Rejected Co" not in names
 
 
 def test_tier0_succession_not_enough():
