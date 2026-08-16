@@ -447,7 +447,7 @@ def set_lead_status(lead_id: int, body: StatusUpdate):
 
 
 class RunRequest(BaseModel):
-    mode: str  # discover | process_imported | requalify_all | single | contact_search | pdl_search | woodway_pipeline | keira_pipeline
+    mode: str  # discover | process_imported | requalify_all | single | contact_search | pdl_search | woodway_pipeline | keira_pipeline | recontact
     prospect: str | None = Field(default=None, max_length=300)
     limit: int = Field(default=5, ge=1, le=500)
     mock: bool = False
@@ -474,10 +474,14 @@ def run_agent(agent: str, body: RunRequest):
     if body.mode not in (
         "discover", "process_imported", "requalify_all", "single",
         "contact_search", "pdl_search", "woodway_pipeline", "keira_pipeline",
+        "recontact",
     ):
         raise HTTPException(400, f"unknown mode: {body.mode}")
     if body.mode == "single" and not (body.prospect and body.prospect.strip()):
         raise HTTPException(400, "prospect required for single mode")
+    if body.mode == "recontact":
+        if agent not in ("woodway", "keira"):
+            raise HTTPException(400, "recontact is only available for Woodway and Keira")
     if body.mode == "woodway_pipeline":
         if agent != "woodway":
             raise HTTPException(400, "woodway_pipeline is only available for Woodway")
@@ -638,6 +642,39 @@ def run_agent(agent: str, body: RunRequest):
                 f"Pipeline complete — {gates.get('survivors', 0)} survivors, "
                 f"{drafts.get('created', 0)} draft(s)"
             )
+            return result
+
+    elif body.mode == "recontact":
+        def work():
+            limit = body.limit if body.limit and body.limit != 5 else 50
+            if agent == "woodway":
+                from .woodway_pipeline import recontact_awaiting
+
+                log(f"Re-contact — Seamless/web for awaiting/missing-email companies (up to {limit})…")
+                result = recontact_awaiting(
+                    agent="woodway",
+                    limit=limit,
+                    skip_existing=False,
+                    on_progress=log,
+                )
+            else:
+                from .keira_contacts import recontact_awaiting
+
+                log(f"Re-contact — Seamless/web for awaiting/missing-email companies (up to {limit})…")
+                result = recontact_awaiting(
+                    agent="keira",
+                    limit=limit,
+                    skip_existing=False,
+                    on_progress=log,
+                )
+            if result.get("skipped"):
+                log("Done — no awaiting_contact companies found")
+            else:
+                log(
+                    f"Done — {result.get('awaiting', 0)} companies, "
+                    f"+{result.get('imported', 0)} imported / "
+                    f"~{result.get('updated', 0)} updated"
+                )
             return result
 
     else:  # contact_search (pdl_search kept as legacy alias)

@@ -215,3 +215,44 @@ def companies_needing_keira_contacts(agent: str = "keira", *, limit: int = 30) -
             (agent, limit),
         ).fetchall()
     return [r["company"] for r in rows if r["company"]]
+
+
+def recontact_awaiting(
+    *,
+    agent: str = "keira",
+    limit: int = 50,
+    skip_existing: bool = False,
+    on_progress=None,
+    config: dict | None = None,
+) -> dict:
+    """Re-run contact search for awaiting_contact + leads still missing email."""
+    emit = on_progress or (lambda msg: None)
+    from .db import get_recontact_companies
+
+    names = get_recontact_companies(agent, limit=max(1, limit))
+    if not names:
+        emit("No companies needing re-contact (awaiting or missing email)")
+        return {
+            "ok": True,
+            "skipped": True,
+            "imported": 0,
+            "updated": 0,
+            "companies": [],
+            "awaiting": 0,
+        }
+    emit(f"Re-contact — {len(names)} companies (awaiting_contact / missing email)…")
+    result = discover_keira_contacts(
+        agent,
+        names,
+        limit=max(limit, len(names)),
+        config=config,
+        skip_existing=skip_existing,
+        on_progress=emit,
+    )
+    result["ok"] = True
+    result["awaiting"] = len(names)
+    emit(
+        f"Re-contact done — +{result.get('imported', 0)} imported / "
+        f"~{result.get('updated', 0)} updated across {len(names)} companies"
+    )
+    return result

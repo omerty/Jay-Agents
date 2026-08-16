@@ -137,6 +137,60 @@ def test_resolve_awaiting_shells(tmp_db):
     assert any(r["status"] == "skipped" for r in get_leads(agent="woodway") if not r.get("contact_name"))
 
 
+def test_recontact_awaiting_only_targets_awaiting_contact(tmp_db, monkeypatch):
+    from src.db import upsert_lead
+    from src.woodway_pipeline import recontact_awaiting
+
+    upsert_lead(
+        {"company": "Await Co", "status": "awaiting_contact", "source": "discover"},
+        agent="woodway",
+    )
+    upsert_lead(
+        {
+            "company": "Hot No Email",
+            "contact_name": "Pat Owner",
+            "status": "qualified",
+            "score": 89,
+            "source": "seamless",
+        },
+        agent="woodway",
+    )
+    upsert_lead(
+        {
+            "company": "Has Email Co",
+            "contact_name": "Sam",
+            "email": "sam@hasemail.com",
+            "status": "qualified",
+            "source": "seamless",
+        },
+        agent="woodway",
+    )
+
+    seen: list[str] = []
+
+    def fake_discover(names, **kwargs):
+        seen.extend(names)
+        return {"imported": 0, "updated": 0, "companies": list(names)}
+
+    monkeypatch.setattr(
+        "src.woodway_pipeline.discover_woodway_contacts_for_companies",
+        fake_discover,
+    )
+    out = recontact_awaiting(agent="woodway", limit=20)
+    assert out["awaiting"] == 2
+    assert "Await Co" in seen
+    assert "Hot No Email" in seen
+    assert "Has Email Co" not in seen
+
+
+def test_recontact_empty_queue(tmp_db):
+    from src.keira_contacts import recontact_awaiting
+
+    out = recontact_awaiting(agent="keira", limit=10)
+    assert out["skipped"] is True
+    assert out["awaiting"] == 0
+
+
 def test_keira_seamless_covers_all_non_rejected_leads():
     """Contract: Keira Seamless pool is gate survivors minus hard rejects — not critic enrich-only."""
     analyzed = [

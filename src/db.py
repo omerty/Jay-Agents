@@ -547,6 +547,56 @@ def get_awaiting_contact_companies(agent: str = "woodway", limit: int = 100) -> 
     return [r["company"] for r in rows if r["company"]]
 
 
+def get_recontact_companies(agent: str = "woodway", limit: int = 100) -> list[str]:
+    """
+    Companies worth a contact-only retry:
+      1) awaiting_contact shells (no person yet)
+      2) active leads missing a usable email (named contact with no email)
+    """
+    init_db()
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(name: str) -> None:
+        key = normalize_company(name)
+        if not name or key in seen:
+            return
+        seen.add(key)
+        out.append(name.strip())
+
+    for name in get_awaiting_contact_companies(agent, limit=limit):
+        _add(name)
+        if len(out) >= limit:
+            return out
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT company FROM leads
+            WHERE agent = ?
+              AND status NOT IN ('skipped', 'emailed', 'replied')
+              AND company IS NOT NULL AND TRIM(company) != ''
+              AND (
+                contact_name IS NULL OR TRIM(contact_name) = ''
+                OR email IS NULL OR TRIM(email) = ''
+              )
+            ORDER BY
+              CASE WHEN status = 'awaiting_contact' THEN 0
+                   WHEN status IN ('qualified', 'drafted', 'imported', 'discovered') THEN 1
+                   ELSE 2 END,
+              CASE WHEN score IS NOT NULL THEN score ELSE 0 END DESC,
+              updated_at DESC
+            LIMIT ?
+            """,
+            (agent, max(limit * 3, 50)),
+        ).fetchall()
+    for r in rows:
+        _add(r["company"] or "")
+        if len(out) >= limit:
+            break
+    return out
+
+
 def get_companies_needing_contacts(agent: str = "woodway", limit: int = 50) -> list[str]:
     """
     Active companies still missing a usable outreach path:

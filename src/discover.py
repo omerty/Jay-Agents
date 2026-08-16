@@ -57,8 +57,17 @@ def build_search_queries(config: dict, max_queries: int = 8, *, agent: str | Non
         from .db import get_companies_needing_contacts
 
         for company in get_companies_needing_contacts(agent, limit=6):
-            pool.append(f'"{company}" "chief privacy officer" OR "data governance" OR DPO')
-            pool.append(f'"{company}" new "privacy officer" OR "head of data governance"')
+            if (agent or "").strip().lower() == "keira":
+                pool.append(
+                    f'"{company}" (Owner OR Founder OR President OR CEO) '
+                    f'(Ottawa OR Kingston OR "Eastern Ontario")'
+                )
+                pool.append(
+                    f'"{company}" "family-owned" OR succession OR "looking to sell" OR retirement'
+                )
+            else:
+                pool.append(f'"{company}" "chief privacy officer" OR "data governance" OR DPO')
+                pool.append(f'"{company}" new "privacy officer" OR "head of data governance"')
     except Exception:
         pass
 

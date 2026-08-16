@@ -114,15 +114,21 @@ def _keira_caps(config: dict, limit: int) -> tuple[int, int, str | None]:
     if caps_disabled():
         seamless_cap = max(limit * 20, max_research_per_run("keira"), 500)
     else:
-        seamless_cap = int(
-            os.getenv("KEIRA_SEAMLESS_ENRICH_CAP")
-            or research.get("max_seamless_credits")
-            or min(limit, 5)
-        )
+        raw_cap = os.getenv("KEIRA_SEAMLESS_ENRICH_CAP")
+        if raw_cap is not None and str(raw_cap).strip() != "":
+            try:
+                seamless_cap = int(raw_cap)
+            except ValueError:
+                seamless_cap = 0
+        else:
+            seamless_cap = int(research.get("max_seamless_credits") or min(max(limit, 1), 25))
+        # Treat 0 as "unset" so we never call allocate(0) → "nothing requested"
+        if seamless_cap <= 0:
+            seamless_cap = max(limit, 10)
     budget_note: str | None = None
     # Never exceed live Seamless budget guards (no-op when SEAMLESS_CAPS_DISABLED)
     try:
-        allowed, note = allocate_research_slots(seamless_cap, agent="keira")
+        allowed, note = allocate_research_slots(max(1, seamless_cap), agent="keira")
         if allowed <= 0:
             budget_note = note or "no Seamless research budget remaining"
             seamless_cap = 0

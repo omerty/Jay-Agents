@@ -816,3 +816,125 @@ def run_woodway_pipeline(
         f"{drafts.get('created', 0)} drafts"
     )
     return summary
+
+
+def discover_woodway_contacts_for_companies(
+    company_names: list[str],
+    *,
+    agent: str = "woodway",
+    limit: int | None = None,
+    skip_existing: bool = False,
+    on_progress=None,
+) -> dict:
+    """Contact-only enrich for an explicit company list (Seamless/web/paid)."""
+    emit = on_progress or (lambda msg: None)
+    names = [n.strip() for n in company_names if n and str(n).strip()]
+    if not names:
+        return {"imported": 0, "updated": 0, "companies": [], "skipped": True, "mode": "none"}
+
+    contact_mode = woodway_contact_discovery_mode()
+    research_limit = max(limit or len(names), len(names), 1)
+    emit(f"Contact search ({contact_mode}) for {len(names)} companies…")
+
+    web_step: dict
+    if contact_mode == "seamless" and seamless_available():
+        from .seamless import max_contacts_per_company, search_and_import_seamless_for_companies
+        from .seamless_budget import max_research_per_run
+
+        research_n = max(
+            research_limit,
+            max_research_per_run(agent),
+            len(names) * max_contacts_per_company(agent),
+        )
+        try:
+            web_step = search_and_import_seamless_for_companies(
+                agent,
+                names,
+                limit=research_n,
+                skip_existing=skip_existing,
+                on_progress=emit,
+            )
+            web_step["fallback"] = False
+        except SeamlessError as e:
+            emit(f"Seamless failed ({e}) — falling back to web research")
+            from .web_contacts import search_and_import_web_contacts
+
+            web_step = search_and_import_web_contacts(
+                agent, names, limit=research_limit, skip_existing=skip_existing, on_progress=emit,
+            )
+            web_step["fallback"] = True
+            web_step["fallback_reason"] = str(e)
+    elif contact_mode == "web":
+        from .web_contacts import search_and_import_web_contacts
+
+        web_step = search_and_import_web_contacts(
+            agent, names, limit=research_limit, skip_existing=skip_existing, on_progress=emit,
+        )
+        web_step["fallback"] = False
+    elif contact_mode == "paid":
+        from .contacts import search_and_import_contacts_for_companies
+
+        web_step = search_and_import_contacts_for_companies(
+            agent, names, limit=research_limit, skip_existing=skip_existing, on_progress=emit,
+        )
+        web_step["fallback"] = True
+        web_step["fallback_reason"] = "WOODWAY_CONTACT_DISCOVERY=paid"
+    else:
+        from .web_contacts import search_and_import_web_contacts
+
+        web_step = search_and_import_web_contacts(
+            agent, names, limit=research_limit, skip_existing=skip_existing, on_progress=emit,
+        )
+        web_step["fallback"] = True
+        web_step["fallback_reason"] = f"mode={contact_mode}"
+
+    from .db import resolve_awaiting_contact_shells, prune_extra_contacts_per_company
+    from .seamless import max_contacts_per_company
+
+    shells = resolve_awaiting_contact_shells(agent)
+    pruned = prune_extra_contacts_per_company(agent, keep=max_contacts_per_company(agent))
+    return {
+        **web_step,
+        "companies": names,
+        "mode": contact_mode,
+        "shell_resolve": {**shells, **pruned},
+    }
+
+
+def recontact_awaiting(
+    *,
+    agent: str = "woodway",
+    limit: int = 50,
+    skip_existing: bool = False,
+    on_progress=None,
+) -> dict:
+    """Re-run contact search for awaiting_contact + leads still missing email."""
+    emit = on_progress or (lambda msg: None)
+    from .db import get_recontact_companies
+
+    names = get_recontact_companies(agent, limit=max(1, limit))
+    if not names:
+        emit("No companies needing re-contact (awaiting or missing email)")
+        return {
+            "ok": True,
+            "skipped": True,
+            "imported": 0,
+            "updated": 0,
+            "companies": [],
+            "awaiting": 0,
+        }
+    emit(f"Re-contact — {len(names)} companies (awaiting_contact / missing email)…")
+    result = discover_woodway_contacts_for_companies(
+        names,
+        agent=agent,
+        limit=limit,
+        skip_existing=skip_existing,
+        on_progress=emit,
+    )
+    result["ok"] = True
+    result["awaiting"] = len(names)
+    emit(
+        f"Re-contact done — +{result.get('imported', 0)} imported / "
+        f"~{result.get('updated', 0)} updated across {len(names)} companies"
+    )
+    return result

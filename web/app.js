@@ -844,6 +844,7 @@ const RUN_LABELS = {
   contact_search: "Contact search",
   woodway_pipeline: "Woodway pipeline",
   keira_pipeline: "Keira pipeline",
+  recontact: "Re-Contact",
 };
 
 function updateContactSearchButton() {
@@ -855,15 +856,21 @@ function updateContactSearchButton() {
   } else if (currentAgent === "keira" && (seamlessConfigured || actavaConfigured)) {
     const rem = seamlessBudget?.credits_remaining_budget;
     btn.textContent = rem != null ? `Keira pipeline (${rem} left)` : "Keira pipeline";
-    btn.title = "Company-first gates → Seamless enrich survivors only → confidential drafts";
+    btn.title = "Company-first gates → Seamless for all non-rejected → confidential drafts";
   } else {
     btn.textContent = "Contact search";
     btn.title = "";
   }
+  const re = $("btn-recontact");
+  if (re) {
+    const show = currentAgent === "woodway" || currentAgent === "keira";
+    re.classList.toggle("hidden", !show);
+    re.title = "Contact search for awaiting_contact + leads still missing email";
+  }
 }
 
 function setActionButtonsDisabled(disabled) {
-  for (const id of ["btn-requalify", "btn-discover", "btn-process", "btn-contacts"]) {
+  for (const id of ["btn-requalify", "btn-discover", "btn-process", "btn-contacts", "btn-recontact"]) {
     const el = $(id);
     if (el) el.disabled = disabled;
   }
@@ -1008,6 +1015,7 @@ async function runAgentAction(mode, { limit } = {}) {
     contact_search: limit ?? 25,
     woodway_pipeline: limit ?? 50,
     keira_pipeline: limit ?? 10,
+    recontact: limit ?? 50,
   };
   setActionButtonsDisabled(true);
   renderJobPanel({ status: "running", log: [{ msg: `Starting ${label.toLowerCase()}…` }] }, label);
@@ -1028,6 +1036,7 @@ async function runAgentAction(mode, { limit } = {}) {
 $("btn-requalify")?.addEventListener("click", () => runAgentAction("requalify_all"));
 $("btn-discover")?.addEventListener("click", () => runAgentAction("discover"));
 $("btn-process")?.addEventListener("click", () => runAgentAction("process_imported"));
+$("btn-recontact")?.addEventListener("click", () => runAgentAction("recontact"));
 $("btn-contacts")?.addEventListener("click", () => {
   if (currentAgent === "woodway") {
     runAgentAction("woodway_pipeline");
