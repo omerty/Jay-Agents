@@ -335,16 +335,17 @@ def build_mna_thesis(intel: dict, qualification: dict) -> dict:
     co = intel.get("company") or {}
     own = intel.get("ownership") or {}
     succ = intel.get("succession") or {}
+    founded = co.get("founded")
+    founded_bit = f", founded {founded}" if founded else ""
+    lead = "Founder-led" if own.get("founder") else "Owner-operated"
+    industry = co.get("industry") or "business"
+    hq = co.get("hq") or "Eastern Ontario"
+    employees = co.get("employees") or "?"
     return {
         "company": co.get("name"),
         "potential_owner": own.get("owner_name"),
         "title": own.get("title"),
-        "thesis": (
-            f"{'Founder-led' if own.get('founder') else 'Owner-operated'} "
-            f"{co.get('industry') or 'business'} in {co.get('hq') or 'Eastern Ontario'}, "
-            f"~{co.get('employees') or '?'} employees"
-            f"{f', founded {co.get('founded')}' if co.get('founded') else ''}."
-        ),
+        "thesis": f"{lead} {industry} in {hq}, ~{employees} employees{founded_bit}.",
         "transaction_context": (
             "Succession / partial liquidity / strategic options"
             if int(succ.get("max_tier") or 0) >= 2
